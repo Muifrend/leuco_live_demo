@@ -41,21 +41,55 @@ This plan is for the demo implementation only. It is not the final production dr
 
 ---
 
+## Verified Current Context
+
+The following items have now been verified or decided for this demo:
+
+| Area | Current status |
+| --- | --- |
+| Demo repository | `/mnt/ssd/projects/leuco_live_demo` is the standalone demo repo |
+| Control-plane references | Referenced camera, site, bring-up, and software docs exist in `/mnt/ssd/projects/drowning_detection` |
+| Camera secret interface | `/mnt/ssd/projects/drowning_detection/.amcrest` exists with `AMCREST_USER`, `AMCREST_PASS`, and `AMCREST_IP` |
+| Camera access | RTSP access is treated as working based on the current Leuco bring-up state and user confirmation |
+| Runtime device | Jetson Orin Nano with JetPack 6.2.2 / L4T 36.5.0 |
+| Native media stack | FFmpeg, GStreamer, OpenCV, and TensorRT are available on the Jetson per the software reference |
+| Python environment | Demo `.venv` exists with `--system-site-packages` and reuses Jetson-native packages |
+| Model environment | PyTorch, torchvision, Ultralytics, OpenCV import path, and CUDA availability are verified |
+| ntfy | Environment config has been added and a test notification to `https://ntfy.sh/leuco` worked on 2026-06-05 |
+| Demo output | Use HTTP for the live annotated demo view |
+| HTTP port | Port `8080` works and is the locked demo port |
+
+The camera still needs to be physically set up or positioned for the final demo view. The exact pool polygon should be calibrated after that camera view is available. Implementation can start before those are ready by using a mock or test-video source and a temporary full-frame or unset polygon mode.
+
+Verified model/runtime package details:
+
+| Package or capability | Verified state |
+| --- | --- |
+| `torch` | `2.8.0` from the JetPack 6.2 / CUDA 12.6 Jetson index |
+| `torchvision` | `0.23.0` |
+| `ultralytics` | `8.4.60`, installed without replacing Jetson-native core packages |
+| `cv2` | `4.8.0` from `/usr/lib/python3.10/dist-packages/cv2/__init__.py` |
+| CUDA | `torch.cuda.is_available() == True`, device Orin, CUDA 12.6 |
+
+`pip check` may report that Ultralytics requires `opencv-python`. That warning is intentional for this demo environment because the `.venv` uses Jetson's native `cv2` instead of the PyPI OpenCV wheel. Do not install `opencv-python` just to clear that warning.
+
+---
+
 ## Final Demo Stack
 
 The implementation should follow this pipeline:
 
 1. Amcrest RTSP live camera stream
-2. Jetson local video ingest
+2. Jetson host-native video ingest
 3. Rough pool polygon mask
 4. Person or pose detection
 5. One-person tracking
 6. Active drowning cue scoring
 7. 6-second temporal confirmation
 8. ntfy notification
-9. Live annotated stream for demonstration
+9. HTTP live annotated stream for demonstration
 
-The live demo should prioritize stability, clarity, and low latency over perfect model accuracy.
+The live demo should prioritize stability, clarity, and low latency over perfect model accuracy. The first implementation should be a host-native Python app on the Jetson using GStreamer/OpenCV for ingest and an HTTP MJPEG stream for viewing.
 
 ---
 
@@ -65,6 +99,9 @@ The live demo should prioritize stability, clarity, and low latency over perfect
 | ------------------ | --------------------------------------------- |
 | Camera input       | Use the existing Amcrest RTSP stream          |
 | Camera frame rate  | Leave camera stream unchanged                 |
+| Runtime            | Host-native Python on the Jetson              |
+| Live output        | HTTP annotated stream                         |
+| HTTP port          | 8080                                          |
 | AI processing rate | Process approximately 8 AI frames per second  |
 | Decision window    | 6 seconds                                     |
 | Window size        | 48 processed AI frames                        |
@@ -73,7 +110,12 @@ The live demo should prioritize stability, clarity, and low latency over perfect
 | Pool gating        | Use a rough polygon mask                      |
 | People in demo     | One person                                    |
 | Alert system       | ntfy                                          |
+| ntfy demo endpoint | `https://ntfy.sh/leuco` via environment config |
 | Alert cooldown     | 60 seconds                                    |
+| Initial model path | Lightweight YOLO pose if stable               |
+| Model fallback     | Person detection plus box/region motion       |
+| DeepStream         | Not included in first demo implementation     |
+| Docker             | Not used for first-line camera/demo runtime   |
 | Cloud escalation   | Not included for this demo                    |
 | Recording          | Outside the scope of this implementation plan |
 
@@ -108,6 +150,8 @@ The system should have three basic location states:
 The rough polygon mask does not need to be perfect for the demo. It only needs to clearly cover the visible water area and exclude most of the surrounding deck.
 
 The mask should be visible or outlined in the live overlay so the viewer can understand why classification is active or inactive.
+
+The exact polygon points are not locked yet because they depend on the final mounted camera view. Once the camera is positioned, capture a current frame and store the image-space polygon points in demo-local configuration.
 
 ---
 
@@ -240,6 +284,12 @@ The overlay should also show:
 
 Keep the overlay simple. The demo should emphasize the decision pipeline, not raw debugging data.
 
+The HTTP app should expose:
+
+* `/` for a minimal browser view with the live annotated stream
+* `/stream.mjpg` for the MJPEG video stream
+* `/status` for machine-readable current demo state
+
 ---
 
 ## Demo Behavior Flow
@@ -309,7 +359,7 @@ The preferred model path is pose-based if stable on the Jetson.
 
 ### Preferred
 
-Use a lightweight YOLO pose model.
+Use a lightweight YOLO pose model, starting with `yolo11n-pose.pt` if the Jetson Python environment supports it cleanly.
 
 Reason:
 
@@ -317,9 +367,19 @@ Reason:
 * Pose keypoints make it easier to estimate arm activity, torso orientation, and head/upper-body movement.
 * Pose gives a better foundation for active drowning cue detection.
 
+Implementation guidance:
+
+* Keep inference behind a small backend interface.
+* Use this repo's demo `.venv`.
+* Preserve the `.venv` with `--system-site-packages` so it can reuse Jetson host modules such as OpenCV and TensorRT.
+* Keep the Jetson-compatible NVIDIA/PyTorch installation path already configured for this demo.
+* Do not allow generic upstream `torch` or `opencv-python` wheels to replace the Jetson-compatible native stack.
+* Do not force heavy ML dependencies directly into the demo repo.
+* Leave room to swap to ONNX or TensorRT later without rewriting the demo logic.
+
 ### Acceptable Demo Fallback
 
-If pose is unstable or too slow, use person detection plus motion features around the person box.
+If `yolo11n-pose.pt` is unstable, unavailable, or too slow, try `yolov8n-pose.pt`. If pose remains unstable or dependency setup becomes the bottleneck, use person detection plus motion features around the person box.
 
 The fallback should still use:
 
@@ -330,6 +390,28 @@ The fallback should still use:
 * low displacement over time
 
 The demo should favor whichever option produces the most stable live result.
+
+---
+
+## Runtime Architecture
+
+The first implementation should be a single host-native app in this demo repository.
+
+Recommended shape:
+
+| Component | Recommendation |
+| --- | --- |
+| Config loading | Read demo-local `.env` plus `/mnt/ssd/projects/drowning_detection/.amcrest` |
+| RTSP ingest | GStreamer/OpenCV, using Jetson hardware decode where available |
+| Display output | HTTP MJPEG stream and simple browser page |
+| Inference | Pluggable backend, mock/test backend for smoke tests, YOLO pose for real detections |
+| Tracking/risk logic | Demo-local Python modules |
+| Alerts | HTTP POST to ntfy |
+| Runtime artifacts | Keep logs/cache local or under `/mnt/ssd`; do not write output into the control-plane repo |
+
+Do not use Docker or DeepStream for the first demo runtime unless host-native ingest or model execution becomes a blocker. The existing Leuco software reference explicitly favors host-native camera bring-up and keeps DeepStream deferred.
+
+The implementation should support building and smoke-testing before the final camera view and pool polygon are available. In that pre-camera mode, use a mock/test source and keep risk classification inactive unless a temporary polygon and test detections are explicitly configured.
 
 ---
 
@@ -359,7 +441,7 @@ Recommended performance design:
 | Layer          | Recommendation                             |
 | -------------- | ------------------------------------------ |
 | Camera stream  | Leave unchanged                            |
-| Display stream | Keep smooth if possible                    |
+| Display stream | HTTP MJPEG, keep smooth if possible        |
 | AI inference   | Sample around 8 frames per second          |
 | Decision logic | Based only on processed AI frames          |
 | Alert timing   | Based on 6 seconds of processed AI history |
@@ -374,11 +456,12 @@ Build the system in this order:
 
 ### Step 1: Live Stream Ingest
 
-Confirm the Jetson can read the Amcrest RTSP stream and produce a live annotated output.
+Build the HTTP annotated output first, using a mock/test source if the final camera is not set up yet. After the camera is positioned, confirm the Jetson can read the Amcrest RTSP stream through the same app.
 
 Success condition:
 
-* Live video is visible with minimal delay.
+* Live video or a test source is visible at `http://<jetson-ip>:8080/` with minimal delay.
+* The same app can later switch to the real RTSP source by configuration.
 
 ### Step 2: Person Detection
 
@@ -440,6 +523,8 @@ Success condition:
 
 Send ntfy only after the window-level threshold is met.
 
+The manual ntfy path has already been verified with a test notification to `https://ntfy.sh/leuco`. The implementation should still read the ntfy URL/topic from environment config rather than hardcoding alert details deep in the code.
+
 Success condition:
 
 * Alert sends after sustained high-risk behavior.
@@ -455,6 +540,19 @@ Run the full staged flow and verify the overlay clearly shows:
 * risk state transition
 * high-risk frame counter
 * ntfy alert sent
+
+---
+
+## Remaining Setup Before Implementation
+
+These items do not block starting implementation, but they are still needed before the full live pool demo can be validated:
+
+| Item | Needed action |
+| --- | --- |
+| Final camera view | Set up or position the Amcrest camera for the demo scene |
+| Pool polygon | Capture a current frame and define the rough water-area polygon |
+
+No additional product-level decisions are currently blocking the demo plan.
 
 ---
 
@@ -482,6 +580,9 @@ Use this as the final locked configuration:
 
 | Setting                     |                                                   Value |
 | --------------------------- | ------------------------------------------------------: |
+| Runtime                     |                           Host-native Python on Jetson |
+| Live output                 |                                   HTTP annotated stream |
+| HTTP port                   |                                                    8080 |
 | AI processing rate          |                                                   8 fps |
 | Decision window             |                                               6 seconds |
 | Processed frames per window |                                                      48 |
@@ -494,6 +595,10 @@ Use this as the final locked configuration:
 | Supporting cues             |                    Vertical posture, head/torso bobbing |
 | Weak cue                    |                   Splashing only as supporting evidence |
 | Alert channel               |                                                    ntfy |
+| Demo ntfy topic             |                                                   leuco |
+| Initial model preference    |                                      Lightweight YOLO pose |
+| Initial build backend       |                                      Mock/test backend first |
+| Initial deployment style    |                             Host-native, not Docker/DeepStream |
 | Cloud escalation            |                                           None for demo |
 
 ---
@@ -502,7 +607,7 @@ Use this as the final locked configuration:
 
 The final demo should prove this chain:
 
-**Live camera feed → person detected → person enters pool mask → active drowning-like cues detected → sustained risk confirmed over 6 seconds → ntfy alert sent.**
+**Live camera feed → HTTP annotated view → person detected → person enters pool mask → active drowning-like cues detected → sustained risk confirmed over 6 seconds → ntfy alert sent.**
 
 The most important technical idea is not simple splashing detection. The core signal should be:
 
