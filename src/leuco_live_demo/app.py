@@ -10,7 +10,7 @@ from .alerts import AlertManager
 from .config import AppConfig
 from .http_server import SharedDemoState, create_server
 from .inference import create_backend
-from .models import AlertState, DecisionState, RiskMetrics
+from .models import AlertState, DecisionState, PoolState, RiskMetrics, Track
 from .overlay import build_status, draw_overlay
 from .pool_gate import PoolGate
 from .risk import RiskEngine
@@ -34,8 +34,8 @@ class DemoApp:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.shared_state = SharedDemoState()
-        self.source = create_source(config)
         self.backend = create_backend(config)
+        self.source = create_source(config)
         self.tracker = OnePersonTracker()
         self.pool_gate = PoolGate(config.pool_gate)
         self.risk = RiskEngine(config)
@@ -43,13 +43,13 @@ class DemoApp:
         self.capture_rate = RateMeter()
         self.http_server = create_server(config.http_host, config.http_port, self.shared_state)
         self.http_thread = threading.Thread(target=self.http_server.serve_forever, daemon=True)
+        self._last_ai_at = 0.0
+        self._min_ai_interval = 1.0 / max(0.1, self.config.ai_fps)
 
     def run(self) -> int:
         self.http_thread.start()
         print(f"Leuco live demo listening on http://{self.config.http_host}:{self.config.http_port}/")
-        last_ai_at = 0.0
-        min_ai_interval = 1.0 / max(0.1, self.config.ai_fps)
-        track = None
+        track: Track | None = None
         pool = self.pool_gate.evaluate(None)
         decision = self._empty_decision()
         alert = self.alerts.snapshot()
@@ -65,34 +65,58 @@ class DemoApp:
                     continue
 
                 capture_fps = self.capture_rate.tick(frame.timestamp)
-                if frame.timestamp - last_ai_at >= min_ai_interval:
-                    result = self.backend.infer(frame)
-                    track = self.tracker.update(result.detections)
-                    pool = self.pool_gate.evaluate(track)
-                    decision = self.risk.process(frame, track, pool)
-                    alert = self.alerts.maybe_send(decision)
-                    last_ai_at = frame.timestamp
+                if self._should_process_ai(frame.timestamp):
+                    track, pool, decision, alert = self._process_ai_frame(frame)
                     message = ""
 
-                status = build_status(self.config, decision, alert, track, capture_fps, message)
-                annotated = draw_overlay(frame.image, status, track, pool)
-                ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
-                if ok:
-                    self.shared_state.update(encoded.tobytes(), status.as_dict())
-                else:
-                    self.shared_state.update_status({**status.as_dict(), "message": "jpeg encode failed"})
+                self._publish_frame(frame.image, decision, alert, track, pool, capture_fps, message)
         except KeyboardInterrupt:
             return 0
         finally:
-            self.shared_state.stop()
-            self.http_server.shutdown()
-            self.source.close()
+            self.close()
+
+    def close(self) -> None:
+        self.shared_state.stop()
+        self.http_server.shutdown()
+        self.http_server.server_close()
+        self.http_thread.join(timeout=2.0)
+        self.source.close()
+
+    def _should_process_ai(self, timestamp: float) -> bool:
+        return timestamp - self._last_ai_at >= self._min_ai_interval
+
+    def _process_ai_frame(self, frame) -> tuple[Track | None, PoolState, DecisionState, AlertState]:
+        result = self.backend.infer(frame)
+        track = self.tracker.update(result.detections)
+        pool = self.pool_gate.evaluate(track)
+        decision = self.risk.process(frame, track, pool)
+        alert = self.alerts.maybe_send(decision)
+        self._last_ai_at = frame.timestamp
+        return track, pool, decision, alert
+
+    def _publish_frame(
+        self,
+        image,
+        decision: DecisionState,
+        alert: AlertState,
+        track: Track | None,
+        pool: PoolState,
+        capture_fps: float,
+        message: str,
+    ) -> None:
+        status = build_status(self.config, decision, alert, track, capture_fps, message)
+        annotated = draw_overlay(image, status, track, pool)
+        ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+        if ok:
+            self.shared_state.update(encoded.tobytes(), status.as_dict())
+            return
+        self.shared_state.update_status({**status.as_dict(), "message": "jpeg encode failed"})
 
     def _publish_status(
         self,
         decision: DecisionState,
         alert: AlertState,
-        track,
+        track: Track | None,
         capture_fps: float,
         message: str,
     ) -> None:

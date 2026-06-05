@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-import math
 
 import cv2
 
 from .config import AppConfig
-from .models import Detection, Frame, InferenceResult, Keypoints
-from .sources import mock_person_pose
+from .mock_scene import mock_person
+from .models import BBox, Detection, Frame, InferenceResult, Keypoints
 
 COCO_POSE_NAMES = [
     "nose",
@@ -43,9 +42,18 @@ class MockInferenceBackend(InferenceBackend):
         if self.scenario == "empty":
             return InferenceResult(detections=[])
         height, width = frame.image.shape[:2]
-        center, phase = mock_person_pose(frame.index, self.scenario, width, height)
-        bbox, keypoints = _mock_detection_geometry(center, phase)
-        return InferenceResult(detections=[Detection(bbox=bbox, confidence=0.94, keypoints=keypoints)])
+        person = mock_person(frame.index, self.scenario, width, height)
+        if person is None:
+            return InferenceResult(detections=[])
+        return InferenceResult(
+            detections=[
+                Detection(
+                    bbox=_clip_bbox(person.bbox, width, height),
+                    confidence=0.94,
+                    keypoints=person.keypoints,
+                )
+            ]
+        )
 
 
 class YOLOPoseBackend(InferenceBackend):
@@ -60,31 +68,24 @@ class YOLOPoseBackend(InferenceBackend):
         self.model = YOLO(str(model_path))
 
     def infer(self, frame: Frame) -> InferenceResult:
+        height, width = frame.image.shape[:2]
         results = self.model(frame.image, verbose=False)
         detections: list[Detection] = []
         for result in results:
             boxes = result.boxes
-            keypoints_obj = getattr(result, "keypoints", None)
             if boxes is None:
                 continue
             for idx, box in enumerate(boxes):
                 cls_id = int(box.cls[0]) if box.cls is not None else -1
                 if cls_id != 0:
                     continue
-                x1, y1, x2, y2 = [int(round(float(value))) for value in box.xyxy[0]]
+                bbox = _clip_bbox(tuple(int(round(float(value))) for value in box.xyxy[0]), width, height)
                 confidence = float(box.conf[0]) if box.conf is not None else 0.0
-                keypoints: Keypoints = {}
-                if keypoints_obj is not None and keypoints_obj.xy is not None:
-                    points = keypoints_obj.xy[idx].tolist()
-                    for name, point in zip(COCO_POSE_NAMES, points):
-                        x, y = point[:2]
-                        if x > 0 and y > 0:
-                            keypoints[name] = (float(x), float(y))
                 detections.append(
                     Detection(
-                        bbox=(x1, y1, x2, y2),
+                        bbox=bbox,
                         confidence=confidence,
-                        keypoints=keypoints,
+                        keypoints=_extract_pose_keypoints(result, idx),
                     )
                 )
         return InferenceResult(detections=detections)
@@ -123,22 +124,33 @@ class MotionBoxBackend(InferenceBackend):
         return InferenceResult(detections=[Detection(bbox=bbox, confidence=0.50)])
 
 
-def _mock_detection_geometry(center: tuple[float, float], phase: float) -> tuple[tuple[int, int, int, int], Keypoints]:
-    cx, cy = center
-    shoulder_y = cy - 44
-    head_y = cy - 75
-    arm_swing = math.sin(phase) * 52
-    bbox = (int(cx - 82), int(cy - 96), int(cx + 82), int(cy + 82))
-    keypoints: Keypoints = {
-        "nose": (cx, head_y),
-        "left_shoulder": (cx - 28, shoulder_y),
-        "right_shoulder": (cx + 28, shoulder_y),
-        "left_elbow": (cx - 48, shoulder_y + arm_swing * 0.7),
-        "right_elbow": (cx + 48, shoulder_y - arm_swing * 0.7),
-        "left_wrist": (cx - 66, shoulder_y + arm_swing),
-        "right_wrist": (cx + 66, shoulder_y - arm_swing),
-    }
-    return bbox, keypoints
+def _extract_pose_keypoints(result, detection_index: int) -> Keypoints:
+    keypoints_obj = getattr(result, "keypoints", None)
+    xy = getattr(keypoints_obj, "xy", None)
+    if xy is None or detection_index >= len(xy):
+        return {}
+    keypoints: Keypoints = {}
+    for name, point in zip(COCO_POSE_NAMES, xy[detection_index].tolist()):
+        if len(point) < 2:
+            continue
+        x, y = point[:2]
+        if x > 0 and y > 0:
+            keypoints[name] = (float(x), float(y))
+    return keypoints
+
+
+def _clip_bbox(bbox: tuple[int, ...], width: int, height: int) -> BBox:
+    x1, y1, x2, y2 = bbox
+    clipped_x1 = max(0, min(width - 1, x1))
+    clipped_y1 = max(0, min(height - 1, y1))
+    clipped_x2 = max(clipped_x1 + 1, min(width, x2))
+    clipped_y2 = max(clipped_y1 + 1, min(height, y2))
+    return (
+        clipped_x1,
+        clipped_y1,
+        clipped_x2,
+        clipped_y2,
+    )
 
 
 def create_backend(config: AppConfig) -> InferenceBackend:

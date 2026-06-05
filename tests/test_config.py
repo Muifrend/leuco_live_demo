@@ -39,6 +39,31 @@ class ConfigTests(unittest.TestCase):
                 "rtsp://admin:p%40ss%2Fword@192.0.2.10:554/cam/realmonitor?channel=1&subtype=0",
             )
 
+    def test_ntfy_url_alias_can_override_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load_config(
+                argv=[],
+                environ={"NTFY_URL": "https://ntfy.sh/local-test"},
+                demo_env=Path(tmp) / ".env",
+                amcrest_env=Path(tmp) / ".amcrest",
+            )
+
+            self.assertEqual(config.ntfy_url, "https://ntfy.sh/local-test")
+
+    def test_high_risk_threshold_cannot_exceed_window(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "cannot exceed"):
+                load_config(
+                    argv=[],
+                    environ={
+                        "LEUCO_AI_FPS": "2",
+                        "LEUCO_DECISION_WINDOW_SECONDS": "2",
+                        "LEUCO_HIGH_RISK_FRAMES": "5",
+                    },
+                    demo_env=Path(tmp) / ".env",
+                    amcrest_env=Path(tmp) / ".amcrest",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 import time
 
 import cv2
 import numpy as np
 
 from .config import AppConfig
+from .mock_scene import MockPerson, mock_person
 from .models import Frame
 
 
@@ -56,27 +56,21 @@ class MockVideoSource(VideoSource):
             2,
             cv2.LINE_AA,
         )
-        if self.scenario == "empty":
+        person = mock_person(index, self.scenario, self.width, self.height)
+        if person is None:
             return image
-        center, arm_phase = mock_person_pose(index, self.scenario, self.width, self.height)
-        self._draw_person(image, center, arm_phase)
+        self._draw_person(image, person)
         return image
 
-    def _draw_person(self, image, center: tuple[float, float], arm_phase: float) -> None:
-        cx, cy = int(center[0]), int(center[1])
-        shoulder_y = cy - 44
-        head = (cx, cy - 75)
-        left_shoulder = (cx - 28, shoulder_y)
-        right_shoulder = (cx + 28, shoulder_y)
-        left_hand = (int(cx - 62), int(shoulder_y + math.sin(arm_phase) * 52))
-        right_hand = (int(cx + 62), int(shoulder_y - math.sin(arm_phase) * 52))
-        torso_bottom = (cx, cy + 58)
+    def _draw_person(self, image, person: MockPerson) -> None:
+        cx, cy = int(person.center[0]), int(person.center[1])
         color = (238, 238, 236)
-        cv2.circle(image, head, 15, color, -1)
-        cv2.line(image, left_shoulder, right_shoulder, color, 6)
-        cv2.line(image, (cx, shoulder_y), torso_bottom, color, 6)
-        cv2.line(image, left_shoulder, left_hand, color, 5)
-        cv2.line(image, right_shoulder, right_hand, color, 5)
+        points = {name: (int(x), int(y)) for name, (x, y) in person.keypoints.items()}
+        cv2.circle(image, points["nose"], 15, color, -1)
+        cv2.line(image, points["left_shoulder"], points["right_shoulder"], color, 6)
+        cv2.line(image, (cx, points["left_shoulder"][1]), (cx, cy + 58), color, 6)
+        cv2.line(image, points["left_shoulder"], points["left_wrist"], color, 5)
+        cv2.line(image, points["right_shoulder"], points["right_wrist"], color, 5)
         cv2.ellipse(image, (cx, cy + 55), (58, 14), 0, 0, 360, (205, 130, 60), 2)
 
 
@@ -134,26 +128,13 @@ class RTSPSource(VideoSource):
 
     @staticmethod
     def _gstreamer_pipeline(rtsp_url: str) -> str:
+        safe_url = rtsp_url.replace('"', '\\"')
         return (
-            f'rtspsrc location="{rtsp_url}" protocols=tcp latency=200 ! '
+            f'rtspsrc location="{safe_url}" protocols=tcp latency=200 ! '
             "rtph264depay ! h264parse ! nvv4l2decoder ! nvvidconv ! "
             "video/x-raw,format=BGRx ! videoconvert ! video/x-raw,format=BGR ! "
             "appsink drop=true sync=false max-buffers=1"
         )
-
-
-def mock_person_pose(
-    index: int,
-    scenario: str,
-    width: int,
-    height: int,
-) -> tuple[tuple[float, float], float]:
-    if scenario == "high_risk" or scenario == "alert":
-        return (width * 0.52, height * 0.52), index * 0.9
-    if scenario == "outside":
-        return (width * 0.5, height * 0.9), index * 0.15
-    travel = (index * 4) % 560
-    return (200 + travel, height * 0.55), index * 0.18
 
 
 def create_source(config: AppConfig) -> VideoSource:

@@ -32,6 +32,7 @@ DEFAULTS: dict[str, str] = {
 VALID_SOURCES = {"mock", "rtsp", "video"}
 VALID_BACKENDS = {"mock", "yolo_pose", "motion_box"}
 VALID_POOL_GATES = {"disabled", "full_frame_stub"}
+DEFAULT_NTFY_URL = DEFAULTS["LEUCO_NTFY_URL"]
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,34 @@ def parse_bool(value: str | bool | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def parse_positive_float(name: str, value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise ValueError(f"{name} must be greater than 0")
+    return parsed
+
+
+def parse_nonnegative_float(name: str, value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise ValueError(f"{name} must be 0 or greater")
+    return parsed
+
+
+def parse_positive_int(name: str, value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise ValueError(f"{name} must be greater than 0")
+    return parsed
+
+
+def parse_port(value: str) -> int:
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise ValueError("LEUCO_HTTP_PORT must be between 1 and 65535")
+    return port
+
+
 def load_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -101,6 +130,14 @@ def load_env_file(path: Path) -> dict[str, str]:
         if key:
             values[key] = value
     return values
+
+
+def _first_non_empty(values: Mapping[str, str], *keys: str) -> str:
+    for key in keys:
+        value = values.get(key, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def build_arg_parser() -> ArgumentParser:
@@ -156,22 +193,42 @@ def load_config(
     if pool_gate not in VALID_POOL_GATES:
         raise ValueError(f"Invalid LEUCO_POOL_GATE: {pool_gate}")
 
+    http_port = parse_port(values["LEUCO_HTTP_PORT"])
+    ai_fps = parse_positive_float("LEUCO_AI_FPS", values["LEUCO_AI_FPS"])
+    decision_window_seconds = parse_positive_float(
+        "LEUCO_DECISION_WINDOW_SECONDS",
+        values["LEUCO_DECISION_WINDOW_SECONDS"],
+    )
+    window_size = max(1, int(round(ai_fps * decision_window_seconds)))
+    high_risk_frames = parse_positive_int("LEUCO_HIGH_RISK_FRAMES", values["LEUCO_HIGH_RISK_FRAMES"])
+    if high_risk_frames > window_size:
+        raise ValueError(
+            "LEUCO_HIGH_RISK_FRAMES cannot exceed the processed decision window "
+            f"({high_risk_frames} > {window_size})"
+        )
+    alert_cooldown_seconds = parse_nonnegative_float(
+        "LEUCO_ALERT_COOLDOWN_SECONDS",
+        values["LEUCO_ALERT_COOLDOWN_SECONDS"],
+    )
+
     video_raw = values.get("LEUCO_VIDEO_PATH", "").strip()
-    ntfy_url = (values.get("LEUCO_NTFY_URL", "") or values.get("NTFY_URL", "")).strip()
-    topic = (values.get("LEUCO_NTFY_TOPIC", "") or values.get("NTFY_TOPIC", "")).strip()
+    ntfy_url = _first_non_empty(values, "LEUCO_NTFY_URL")
+    if ntfy_url == DEFAULT_NTFY_URL:
+        ntfy_url = _first_non_empty(values, "NTFY_URL", "LEUCO_NTFY_URL")
+    topic = _first_non_empty(values, "LEUCO_NTFY_TOPIC", "NTFY_TOPIC")
     if not ntfy_url and topic:
         ntfy_url = f"https://ntfy.sh/{topic}"
 
     return AppConfig(
         http_host=values["LEUCO_HTTP_HOST"].strip(),
-        http_port=int(values["LEUCO_HTTP_PORT"]),
+        http_port=http_port,
         source=source,
         inference_backend=backend,
         pool_gate=pool_gate,
-        ai_fps=float(values["LEUCO_AI_FPS"]),
-        decision_window_seconds=float(values["LEUCO_DECISION_WINDOW_SECONDS"]),
-        high_risk_frames=int(values["LEUCO_HIGH_RISK_FRAMES"]),
-        alert_cooldown_seconds=float(values["LEUCO_ALERT_COOLDOWN_SECONDS"]),
+        ai_fps=ai_fps,
+        decision_window_seconds=decision_window_seconds,
+        high_risk_frames=high_risk_frames,
+        alert_cooldown_seconds=alert_cooldown_seconds,
         alerts_enabled=parse_bool(values["LEUCO_ALERTS_ENABLED"]),
         ntfy_url=ntfy_url,
         ntfy_title=values.get("LEUCO_NTFY_TITLE", "Leuco demo alert"),

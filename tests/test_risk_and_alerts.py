@@ -109,6 +109,34 @@ class RiskAndAlertTests(unittest.TestCase):
         )
         self.assertEqual(manager.maybe_send(no_alert).state, "idle")
 
+    def test_failed_alert_attempt_uses_cooldown(self) -> None:
+        config = config_for(LEUCO_ALERTS_ENABLED="1")
+        now = [100.0]
+
+        def failing_opener(_request, _timeout):
+            raise OSError("network unavailable")
+
+        manager = AlertManager(config=config, opener=failing_opener, clock=lambda: now[0])
+        decision = DecisionState(
+            person_detected=True,
+            in_pool=True,
+            risk_active=True,
+            risk_state="high_risk",
+            high_risk_frames=34,
+            window_size=48,
+            window_seconds=6,
+            ai_fps=8,
+            should_alert=True,
+            metrics=RiskMetrics(high_activity=True, low_progress=True),
+        )
+
+        failed = manager.maybe_send(decision)
+        self.assertEqual(failed.state, "failed")
+        self.assertEqual(failed.last_error, "network unavailable")
+
+        now[0] = 101.0
+        self.assertEqual(manager.maybe_send(decision).state, "cooldown")
+
 
 if __name__ == "__main__":
     unittest.main()

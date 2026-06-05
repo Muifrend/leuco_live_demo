@@ -17,6 +17,7 @@ class AlertManager:
 
     def __post_init__(self) -> None:
         self.last_alert_at: float | None = None
+        self.last_attempt_at: float | None = None
         self.last_error: str | None = None
         self.state = "idle"
 
@@ -28,12 +29,14 @@ class AlertManager:
             self.state = "idle"
             return self.snapshot()
 
-        if self.last_alert_at is not None:
-            elapsed = now - self.last_alert_at
+        cooldown_started_at = self.last_attempt_at if self.last_attempt_at is not None else self.last_alert_at
+        if cooldown_started_at is not None:
+            elapsed = now - cooldown_started_at
             if elapsed < self.config.alert_cooldown_seconds:
                 self.state = "cooldown"
                 return self.snapshot()
 
+        self.last_attempt_at = now
         if not self.config.alerts_enabled:
             self.last_alert_at = now
             self.state = "dry_run"

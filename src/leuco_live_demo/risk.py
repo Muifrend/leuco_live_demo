@@ -17,6 +17,10 @@ UPPER_BODY_KEYS = {
     "left_wrist",
     "right_wrist",
 }
+POSE_ACTIVITY_THRESHOLD = 0.045
+FALLBACK_MOTION_THRESHOLD = 0.045
+FORWARD_PROGRESS_THRESHOLD = 0.025
+FORWARD_PROGRESS_LOOKBACK_SECONDS = 2.0
 
 
 def _bbox_diag(track: Track) -> float:
@@ -80,12 +84,14 @@ class RiskEngine:
     def _metrics(self, frame: Frame, track: Track) -> RiskMetrics:
         if track.keypoints:
             upper_activity = self._pose_activity(track)
+            activity_threshold = POSE_ACTIVITY_THRESHOLD
         else:
             upper_activity = self._motion_activity(frame, track)
+            activity_threshold = FALLBACK_MOTION_THRESHOLD
         forward_progress = self._forward_progress(frame)
 
-        high_activity = upper_activity >= 0.045
-        low_progress = forward_progress <= 0.025
+        high_activity = upper_activity >= activity_threshold
+        low_progress = forward_progress <= FORWARD_PROGRESS_THRESHOLD
         return RiskMetrics(
             upper_activity=upper_activity,
             forward_progress=forward_progress,
@@ -135,7 +141,10 @@ class RiskEngine:
     def _forward_progress(self, frame: Frame) -> float:
         if len(self.centers) < 2:
             return 0.0
-        lookback = min(len(self.centers), max(2, int(round(self.config.ai_fps * 2))))
+        lookback = min(
+            len(self.centers),
+            max(2, int(round(self.config.ai_fps * FORWARD_PROGRESS_LOOKBACK_SECONDS))),
+        )
         start = self.centers[-lookback]
         end = self.centers[-1]
         return math.hypot(end[0] - start[0], end[1] - start[1]) / _frame_diag(frame)
