@@ -75,7 +75,7 @@ class ConfigTests(unittest.TestCase):
 
             self.assertIsNone(config.inference_roi)
 
-    def test_pool_polygon_defaults_to_roboflow_reference(self) -> None:
+    def test_pool_polygon_defaults_to_live_frame_mask(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = load_config(
                 argv=[],
@@ -84,9 +84,9 @@ class ConfigTests(unittest.TestCase):
                 amcrest_env=Path(tmp) / ".amcrest",
             )
 
-            self.assertEqual(config.pool_polygon_reference_size, (1920, 1080))
-            self.assertEqual(len(config.pool_polygon or ()), 25)
-            self.assertEqual((config.pool_polygon or ())[0], (515.0, 515.0))
+            self.assertEqual(config.pool_polygon_reference_size, (2960, 1668))
+            self.assertEqual(len(config.pool_polygon or ()), 26)
+            self.assertEqual((config.pool_polygon or ())[0], (833.0, 676.0))
 
     def test_inference_roi_parses_cli_value(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

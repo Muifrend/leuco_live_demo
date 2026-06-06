@@ -61,8 +61,8 @@ to inference. If those points were picked from a screenshot, set
 app scales the crop to the true RTSP frame size. The HTTP stream remains
 full-frame, and the overlay draws the effective ROI rectangle.
 
-`LEUCO_POOL_POLYGON` accepts `x,y;x,y;x,y` and defaults to the Roboflow
-pool-water outline from a `1920x1080` reference image. With
+`LEUCO_POOL_POLYGON` accepts `x,y;x,y;x,y` and defaults to the live-frame
+pool-water mask from a `2960x1668` reference image. With
 `--pool-gate polygon`, the app tests the tracked person's lower-center
 bounding-box point against the scaled polygon. Risk stays inactive when the
 person is outside the polygon.
