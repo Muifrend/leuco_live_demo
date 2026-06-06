@@ -31,22 +31,22 @@ RTSP smoke mode, before polygon calibration:
 .venv/bin/python -m leuco_live_demo --source rtsp --backend motion_box --pool-gate disabled
 ```
 
-RTSP YOLO pose mode with the current high/wide camera ROI starting point:
+RTSP YOLO pose mode with the current tightened high/wide camera ROI:
 
 ```bash
-.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 300,220,1080,670 --inference-roi-reference-size 1554x882
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882
 ```
 
 Use debug logs while tuning camera/model startup:
 
 ```bash
-.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 300,220,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
 ```
 
 If the camera main stream is H.265, force the H.265 GStreamer pipeline:
 
 ```bash
-.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline h265 --backend yolo_pose --pool-gate disabled --inference-roi 300,220,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline h265 --backend yolo_pose --pool-gate disabled --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
 ```
 
 `--gstreamer-pipeline auto` tries H.264 forced TCP, H.264 default transport,
