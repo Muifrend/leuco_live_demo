@@ -57,7 +57,13 @@ class RTSPSourceTests(unittest.TestCase):
                 direct_capture = capture
             return capture
 
-        source = RTSPSource("rtsp://camera", backend="auto", capture_factory=factory, threaded=False)
+        source = RTSPSource(
+            "rtsp://camera",
+            backend="auto",
+            capture_factory=factory,
+            threaded=False,
+            initial_frame_timeout_seconds=0.0,
+        )
 
         self.assertEqual(source.backend_name, "OpenCV direct")
         self.assertEqual(len(gstreamer_captures), 6)
@@ -104,6 +110,32 @@ class RTSPSourceTests(unittest.TestCase):
         self.assertIn("rtph265depay", calls[0][0])
         self.assertNotIn("rtph264depay", calls[0][0])
         self.assertIn("protocols=tcp", calls[0][0])
+        self.assertEqual(source.capture.properties, [])
+
+    def test_gstreamer_waits_for_slow_initial_frame(self) -> None:
+        image = np.zeros((20, 30, 3), dtype=np.uint8)
+        capture = None
+
+        def factory(_target, _api_preference):
+            nonlocal capture
+            capture = FakeCapture(opened=True, frames=[None, None, image])
+            return capture
+
+        source = RTSPSource(
+            "rtsp://camera",
+            backend="gstreamer",
+            gstreamer_pipeline="h264",
+            capture_factory=factory,
+            threaded=False,
+            initial_frame_timeout_seconds=1.0,
+        )
+
+        self.assertEqual(source.backend_name, "GStreamer h264 forced-tcp")
+        frame = source.read()
+        self.assertIsNotNone(frame)
+        self.assertIs(frame.image, image)
+        self.assertIsNotNone(capture)
+        self.assertEqual(capture.properties, [])
 
     def test_gstreamer_selected_mode_falls_back_from_tcp_to_default_transport(self) -> None:
         image = np.zeros((20, 30, 3), dtype=np.uint8)
@@ -120,6 +152,7 @@ class RTSPSourceTests(unittest.TestCase):
             gstreamer_pipeline="h264",
             capture_factory=factory,
             threaded=False,
+            initial_frame_timeout_seconds=0.0,
         )
 
         self.assertEqual(source.backend_name, "GStreamer h264 default")
@@ -139,13 +172,20 @@ class RTSPSourceTests(unittest.TestCase):
 
         self.assertEqual(source.backend_name, "FFmpeg")
         self.assertEqual(calls, [cv2.CAP_FFMPEG])
+        self.assertEqual(source.capture.properties, [(cv2.CAP_PROP_BUFFERSIZE, 1)])
 
     def test_raises_when_no_backend_delivers_initial_frame(self) -> None:
         def factory(_target, _api_preference):
             return FakeCapture(opened=True, frames=[])
 
         with self.assertRaisesRegex(RuntimeError, "initial RTSP frame"):
-            RTSPSource("rtsp://camera", backend="auto", capture_factory=factory, threaded=False)
+            RTSPSource(
+                "rtsp://camera",
+                backend="auto",
+                capture_factory=factory,
+                threaded=False,
+                initial_frame_timeout_seconds=0.0,
+            )
 
 
 if __name__ == "__main__":

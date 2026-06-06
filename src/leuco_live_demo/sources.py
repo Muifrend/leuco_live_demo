@@ -13,6 +13,9 @@ from .mock_scene import MockPerson, mock_person
 from .models import Frame
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_INITIAL_FRAME_TIMEOUT_SECONDS = 2.0
+GSTREAMER_INITIAL_FRAME_TIMEOUT_SECONDS = 8.0
+INITIAL_FRAME_RETRY_INTERVAL_SECONDS = 0.1
 
 
 class VideoSource:
@@ -118,11 +121,13 @@ class RTSPSource(VideoSource):
         gstreamer_pipeline: str = "auto",
         capture_factory=None,
         threaded: bool = True,
+        initial_frame_timeout_seconds: float | None = None,
     ) -> None:
         self.rtsp_url = rtsp_url
         self.backend = backend
         self.gstreamer_pipeline = gstreamer_pipeline
         self._capture_factory = capture_factory or cv2.VideoCapture
+        self._initial_frame_timeout_seconds = initial_frame_timeout_seconds
         self.capture, self.backend_name, initial_image = self._open_verified_capture()
         self._threaded = threaded
         self._closed = False
@@ -219,13 +224,24 @@ class RTSPSource(VideoSource):
                 failures.append(f"{name}: open failed")
                 continue
 
-            self._set_low_latency_buffer(capture, name)
-            ok, image = capture.read()
-            if ok and image is not None and getattr(image, "size", 0) > 0:
-                LOGGER.info("%s RTSP delivered initial frame shape=%s", name, image.shape[:2])
+            self._set_low_latency_buffer(capture, name, api_preference)
+            image, attempts, elapsed = self._read_initial_frame(capture, api_preference)
+            if image is not None:
+                LOGGER.info(
+                    "%s RTSP delivered initial frame shape=%s after %s read attempt(s) in %.1fs",
+                    name,
+                    image.shape[:2],
+                    attempts,
+                    elapsed,
+                )
                 return capture, name, image
 
-            LOGGER.warning("%s RTSP opened but delivered no initial frame", name)
+            LOGGER.warning(
+                "%s RTSP opened but delivered no initial frame after %s read attempt(s) in %.1fs",
+                name,
+                attempts,
+                elapsed,
+            )
             self._release_capture(capture)
             failures.append(f"{name}: no initial frame")
 
@@ -270,8 +286,32 @@ class RTSPSource(VideoSource):
             (self.gstreamer_pipeline, "default"),
         ]
 
+    def _read_initial_frame(self, capture, api_preference: int):
+        timeout = self._initial_frame_timeout(api_preference)
+        deadline = time.monotonic() + timeout
+        attempts = 0
+        started_at = time.monotonic()
+
+        while True:
+            attempts += 1
+            ok, image = capture.read()
+            if ok and image is not None and getattr(image, "size", 0) > 0:
+                return image, attempts, time.monotonic() - started_at
+            if time.monotonic() >= deadline:
+                return None, attempts, time.monotonic() - started_at
+            time.sleep(INITIAL_FRAME_RETRY_INTERVAL_SECONDS)
+
+    def _initial_frame_timeout(self, api_preference: int) -> float:
+        if self._initial_frame_timeout_seconds is not None:
+            return self._initial_frame_timeout_seconds
+        if api_preference == cv2.CAP_GSTREAMER:
+            return GSTREAMER_INITIAL_FRAME_TIMEOUT_SECONDS
+        return DEFAULT_INITIAL_FRAME_TIMEOUT_SECONDS
+
     @staticmethod
-    def _set_low_latency_buffer(capture, backend_name: str) -> None:
+    def _set_low_latency_buffer(capture, backend_name: str, api_preference: int) -> None:
+        if api_preference == cv2.CAP_GSTREAMER:
+            return
         try:
             capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception as exc:  # noqa: BLE001 - not all backends support this property
