@@ -86,7 +86,7 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(config.pool_polygon_reference_size, (2960, 1668))
             self.assertEqual(len(config.pool_polygon or ()), 26)
-            self.assertEqual((config.pool_polygon or ())[0], (833.0, 676.0))
+            self.assertEqual((config.pool_polygon or ())[0], (833.0, 691.0))
 
     def test_inference_roi_parses_cli_value(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
