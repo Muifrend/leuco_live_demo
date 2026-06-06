@@ -31,12 +31,24 @@ class HttpServerTests(unittest.TestCase):
             self.assertEqual(payload["risk_state"], "normal")
 
             with urlopen(f"http://127.0.0.1:{port}/", timeout=2) as response:
-                self.assertIn(b"Leuco Live Demo", response.read())
+                index = response.read()
+            self.assertIn(b"Leuco Live Demo", index)
+            self.assertIn(b'src="stream.mjpg"', index)
+            self.assertIn(b"fetch('status'", index)
+
+            with urlopen(f"http://127.0.0.1:{port}/proxy/8080/status", timeout=2) as response:
+                prefixed_payload = json.loads(response.read().decode("utf-8"))
+            self.assertEqual(prefixed_payload["risk_state"], "normal")
 
             with urlopen(f"http://127.0.0.1:{port}/stream.mjpg", timeout=2) as response:
                 chunk = response.read(256)
             self.assertIn(b"--frame", chunk)
             self.assertIn(b"Content-Type: image/jpeg", chunk)
+
+            with urlopen(f"http://127.0.0.1:{port}/proxy/8080/stream.mjpg", timeout=2) as response:
+                prefixed_chunk = response.read(256)
+            self.assertIn(b"--frame", prefixed_chunk)
+            self.assertIn(b"Content-Type: image/jpeg", prefixed_chunk)
         finally:
             state.stop()
             server.shutdown()

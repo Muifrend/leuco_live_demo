@@ -3,9 +3,14 @@ from __future__ import annotations
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import logging
 import threading
 import time
 from typing import Any
+from urllib.parse import urlsplit
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SharedDemoState:
@@ -44,14 +49,24 @@ def create_server(host: str, port: int, state: SharedDemoState) -> ThreadingHTTP
             return None
 
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
-            if self.path == "/":
+            path = urlsplit(self.path).path
+            LOGGER.debug("HTTP GET %s", path)
+            if self._is_index_path(path):
                 self._index()
-            elif self.path == "/stream.mjpg":
+            elif self._matches_path(path, "stream.mjpg"):
                 self._stream()
-            elif self.path == "/status":
+            elif self._matches_path(path, "status"):
                 self._status()
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
+
+        @staticmethod
+        def _is_index_path(path: str) -> bool:
+            return path in {"", "/"} or path.endswith("/")
+
+        @staticmethod
+        def _matches_path(path: str, endpoint: str) -> bool:
+            return path == f"/{endpoint}" or path.endswith(f"/{endpoint}")
 
         def _index(self) -> None:
             body = INDEX_HTML.encode("utf-8")
@@ -76,6 +91,7 @@ def create_server(host: str, port: int, state: SharedDemoState) -> ThreadingHTTP
             self.send_header("Age", "0")
             self.send_header("Cache-Control", "no-cache, private")
             self.send_header("Pragma", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
             self.end_headers()
             last_sent: bytes | None = None
@@ -115,13 +131,13 @@ INDEX_HTML = """<!doctype html>
 </head>
 <body>
   <main>
-    <header><strong>Leuco Live Demo</strong><code id="status">/status</code></header>
-    <img src="/stream.mjpg" alt="Leuco annotated live stream">
+    <header><strong>Leuco Live Demo</strong><code id="status">status</code></header>
+    <img src="stream.mjpg" alt="Leuco annotated live stream">
   </main>
   <script>
     async function tick() {
       try {
-        const res = await fetch('/status', {cache: 'no-store'});
+        const res = await fetch('status', {cache: 'no-store'});
         const data = await res.json();
         const message = data.message ? ` | ${data.message}` : '';
         document.getElementById('status').textContent = `${data.risk_state || 'starting'} | ${data.alert_state || 'idle'}${message}`;
