@@ -4,6 +4,7 @@ import cv2
 
 from .config import AppConfig
 from .models import AlertState, DecisionState, PoolState, RuntimeStatus, Track
+from .roi import scale_roi_to_frame
 
 
 def build_status(
@@ -31,6 +32,8 @@ def build_status(
         last_alert_at=alert.last_alert_at,
         tracked_id=track.track_id if track and track.missed_frames == 0 else None,
         bbox=track.bbox if track and track.missed_frames == 0 else None,
+        inference_roi=config.inference_roi,
+        inference_roi_reference_size=config.inference_roi_reference_size,
         upper_activity=round(decision.metrics.upper_activity, 4),
         forward_progress=round(decision.metrics.forward_progress, 4),
         message=message or alert.last_error or "",
@@ -49,6 +52,22 @@ def draw_overlay(
     if status.pool_gate == "full_frame_stub":
         cv2.rectangle(canvas, (4, 4), (width - 5, height - 5), (0, 220, 255), 3)
         _label(canvas, "FULL-FRAME POOL STUB", (18, 32), (0, 220, 255))
+
+    if status.inference_roi is not None:
+        x1, y1, x2, y2 = scale_roi_to_frame(
+            status.inference_roi,
+            status.inference_roi_reference_size,
+            width,
+            height,
+        )
+        if x1 < width and y1 < height and x2 > 0 and y2 > 0:
+            x1 = max(0, min(width - 1, x1))
+            y1 = max(0, min(height - 1, y1))
+            x2 = max(x1 + 1, min(width, x2))
+            y2 = max(y1 + 1, min(height, y2))
+            roi_color = (255, 160, 0)
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), roi_color, 2)
+            _label(canvas, "INFERENCE ROI", (x1, max(22, y1 - 8)), roi_color)
 
     if track is not None and track.missed_frames == 0:
         x1, y1, x2, y2 = track.bbox

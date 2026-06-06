@@ -31,6 +31,36 @@ RTSP smoke mode, before polygon calibration:
 .venv/bin/python -m leuco_live_demo --source rtsp --backend motion_box --pool-gate disabled
 ```
 
+RTSP YOLO pose mode with the current high/wide camera ROI starting point:
+
+```bash
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 300,220,1080,670 --inference-roi-reference-size 1554x882
+```
+
+Use debug logs while tuning camera/model startup:
+
+```bash
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 300,220,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
+```
+
+If the camera main stream is H.265, force the H.265 GStreamer pipeline:
+
+```bash
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline h265 --backend yolo_pose --pool-gate disabled --inference-roi 300,220,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
+```
+
+`--gstreamer-pipeline auto` tries H.264 forced TCP, H.264 default transport,
+H.265 forced TCP, H.265 default transport, `decodebin` forced TCP, and
+`decodebin` default transport. `--rtsp-backend auto` then tries OpenCV direct
+RTSP open as a last fallback. Use `--rtsp-backend ffmpeg` only when you
+explicitly want the FFmpeg backend.
+
+`LEUCO_INFERENCE_ROI` accepts `x1,y1,x2,y2` and crops only the frame passed
+to inference. If those points were picked from a screenshot, set
+`LEUCO_INFERENCE_ROI_REFERENCE_SIZE` to that screenshot's `WIDTHxHEIGHT` so the
+app scales the crop to the true RTSP frame size. The HTTP stream remains
+full-frame, and the overlay draws the effective ROI rectangle.
+
 The RTSP source reads Amcrest credentials from
 `/mnt/ssd/projects/drowning_detection/.amcrest`.
 

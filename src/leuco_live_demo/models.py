@@ -6,6 +6,7 @@ from typing import Any
 BBox = tuple[int, int, int, int]
 Point = tuple[float, float]
 Keypoints = dict[str, Point]
+FrameSize = tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,8 @@ class RuntimeStatus:
     last_alert_at: float | None
     tracked_id: int | None
     bbox: BBox | None
+    inference_roi: BBox | None
+    inference_roi_reference_size: FrameSize | None
     upper_activity: float
     forward_progress: float
     message: str = ""
@@ -117,6 +120,8 @@ class RuntimeStatus:
             "last_alert_at": self.last_alert_at,
             "tracked_id": self.tracked_id,
             "bbox": self.bbox,
+            "inference_roi": self.inference_roi,
+            "inference_roi_reference_size": self.inference_roi_reference_size,
             "upper_activity": self.upper_activity,
             "forward_progress": self.forward_progress,
             "message": self.message,

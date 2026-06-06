@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import cv2
 
 from .config import AppConfig
 from .mock_scene import mock_person
-from .models import BBox, Detection, Frame, InferenceResult, Keypoints
+from .models import BBox, Detection, Frame, FrameSize, InferenceResult, Keypoints
+from .roi import scale_roi_to_frame
+
+LOGGER = logging.getLogger(__name__)
 
 COCO_POSE_NAMES = [
     "nose",
@@ -32,6 +36,56 @@ COCO_POSE_NAMES = [
 class InferenceBackend:
     def infer(self, frame: Frame) -> InferenceResult:
         raise NotImplementedError
+
+
+class ROICropBackend(InferenceBackend):
+    """Runs another backend on a configured crop and maps detections back."""
+
+    def __init__(
+        self,
+        backend: InferenceBackend,
+        roi: BBox,
+        reference_size: FrameSize | None = None,
+    ) -> None:
+        self.backend = backend
+        self.roi = roi
+        self.reference_size = reference_size
+        self._logged_roi: BBox | None = None
+
+    def infer(self, frame: Frame) -> InferenceResult:
+        height, width = frame.image.shape[:2]
+        effective_roi = scale_roi_to_frame(self.roi, self.reference_size, width, height)
+        if self._logged_roi != effective_roi:
+            LOGGER.info(
+                "effective inference ROI %s for frame=%sx%s reference=%s",
+                effective_roi,
+                width,
+                height,
+                self.reference_size or "frame",
+            )
+            self._logged_roi = effective_roi
+        bounded_roi = _clip_roi(effective_roi, width, height)
+        if bounded_roi is None:
+            return InferenceResult(detections=[])
+
+        x1, y1, x2, y2 = bounded_roi
+        crop = frame.image[y1:y2, x1:x2].copy()
+        if crop.size == 0:
+            return InferenceResult(detections=[])
+
+        crop_frame = Frame(image=crop, timestamp=frame.timestamp, index=frame.index)
+        result = self.backend.infer(crop_frame)
+        return InferenceResult(
+            detections=[
+                Detection(
+                    bbox=_clip_bbox(_offset_bbox(detection.bbox, x1, y1), width, height),
+                    confidence=detection.confidence,
+                    label=detection.label,
+                    keypoints=_offset_keypoints(detection.keypoints, x1, y1),
+                )
+                for detection in result.detections
+            ]
+        )
 
 
 class MockInferenceBackend(InferenceBackend):
@@ -65,7 +119,9 @@ class YOLOPoseBackend(InferenceBackend):
             )
         from ultralytics import YOLO
 
+        LOGGER.info("loading YOLO pose model: %s", model_path)
         self.model = YOLO(str(model_path))
+        LOGGER.info("YOLO pose model loaded")
 
     def infer(self, frame: Frame) -> InferenceResult:
         height, width = frame.image.shape[:2]
@@ -153,11 +209,46 @@ def _clip_bbox(bbox: tuple[int, ...], width: int, height: int) -> BBox:
     )
 
 
+def _clip_roi(roi: BBox, width: int, height: int) -> BBox | None:
+    x1, y1, x2, y2 = roi
+    if width <= 0 or height <= 0 or x1 >= width or y1 >= height:
+        return None
+    clipped_x1 = max(0, min(width - 1, x1))
+    clipped_y1 = max(0, min(height - 1, y1))
+    clipped_x2 = min(width, x2)
+    clipped_y2 = min(height, y2)
+    if clipped_x1 >= clipped_x2 or clipped_y1 >= clipped_y2:
+        return None
+    return (clipped_x1, clipped_y1, clipped_x2, clipped_y2)
+
+
+def _offset_bbox(bbox: BBox, offset_x: int, offset_y: int) -> BBox:
+    x1, y1, x2, y2 = bbox
+    return (x1 + offset_x, y1 + offset_y, x2 + offset_x, y2 + offset_y)
+
+
+def _offset_keypoints(keypoints: Keypoints, offset_x: int, offset_y: int) -> Keypoints:
+    return {name: (x + offset_x, y + offset_y) for name, (x, y) in keypoints.items()}
+
+
 def create_backend(config: AppConfig) -> InferenceBackend:
+    backend: InferenceBackend
     if config.inference_backend == "mock":
-        return MockInferenceBackend(config.mock_scenario)
-    if config.inference_backend == "yolo_pose":
-        return YOLOPoseBackend(config.model_path)
-    if config.inference_backend == "motion_box":
-        return MotionBoxBackend()
-    raise ValueError(f"Unsupported inference backend: {config.inference_backend}")
+        LOGGER.info("creating mock inference backend scenario=%s", config.mock_scenario)
+        backend = MockInferenceBackend(config.mock_scenario)
+    elif config.inference_backend == "yolo_pose":
+        backend = YOLOPoseBackend(config.model_path)
+    elif config.inference_backend == "motion_box":
+        LOGGER.info("creating motion_box inference backend")
+        backend = MotionBoxBackend()
+    else:
+        raise ValueError(f"Unsupported inference backend: {config.inference_backend}")
+
+    if config.inference_roi is None:
+        return backend
+    LOGGER.info(
+        "wrapping inference backend with ROI crop %s reference_size=%s",
+        config.inference_roi,
+        config.inference_roi_reference_size or "frame",
+    )
+    return ROICropBackend(backend, config.inference_roi, config.inference_roi_reference_size)

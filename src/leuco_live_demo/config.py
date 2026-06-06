@@ -7,6 +7,8 @@ import os
 from typing import Mapping
 from urllib.parse import quote
 
+from .models import BBox, FrameSize
+
 CONTROL_AMCREST_ENV = Path("/mnt/ssd/projects/drowning_detection/.amcrest")
 DEMO_ENV = Path(".env")
 
@@ -27,11 +29,18 @@ DEFAULTS: dict[str, str] = {
     "LEUCO_VIDEO_PATH": "",
     "LEUCO_MOCK_SCENARIO": "normal",
     "LEUCO_RTSP_SUBTYPE": "0",
+    "LEUCO_RTSP_BACKEND": "auto",
+    "LEUCO_GSTREAMER_PIPELINE": "auto",
+    "LEUCO_INFERENCE_ROI": "",
+    "LEUCO_INFERENCE_ROI_REFERENCE_SIZE": "",
+    "LEUCO_LOG_LEVEL": "INFO",
 }
 
 VALID_SOURCES = {"mock", "rtsp", "video"}
 VALID_BACKENDS = {"mock", "yolo_pose", "motion_box"}
 VALID_POOL_GATES = {"disabled", "full_frame_stub"}
+VALID_RTSP_BACKENDS = {"auto", "gstreamer", "ffmpeg"}
+VALID_GSTREAMER_PIPELINES = {"auto", "h264", "h265", "decodebin", "uridecodebin"}
 DEFAULT_NTFY_URL = DEFAULTS["LEUCO_NTFY_URL"]
 
 
@@ -58,6 +67,11 @@ class AppConfig:
     amcrest_rtsp_main: str
     amcrest_rtsp_sub: str
     rtsp_subtype: str
+    rtsp_backend: str
+    gstreamer_pipeline: str
+    inference_roi: BBox | None
+    inference_roi_reference_size: FrameSize | None
+    log_level: str
 
     @property
     def window_size(self) -> int:
@@ -112,6 +126,48 @@ def parse_port(value: str) -> int:
     return port
 
 
+def parse_inference_roi(value: str | None) -> BBox | None:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "disabled":
+        return None
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) != 4:
+        raise ValueError("LEUCO_INFERENCE_ROI must be x1,y1,x2,y2 or disabled")
+    try:
+        x1, y1, x2, y2 = (int(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError("LEUCO_INFERENCE_ROI must contain four integer coordinates") from exc
+    if min(x1, y1, x2, y2) < 0:
+        raise ValueError("LEUCO_INFERENCE_ROI coordinates must be nonnegative")
+    if x2 <= x1 or y2 <= y1:
+        raise ValueError("LEUCO_INFERENCE_ROI must satisfy x2 > x1 and y2 > y1")
+    return (x1, y1, x2, y2)
+
+
+def parse_frame_size(name: str, value: str | None) -> FrameSize | None:
+    raw = str(value or "").strip().lower()
+    if not raw or raw == "disabled":
+        return None
+    normalized = raw.replace("x", ",")
+    parts = [part.strip() for part in normalized.split(",")]
+    if len(parts) != 2:
+        raise ValueError(f"{name} must be WIDTHxHEIGHT, WIDTH,HEIGHT, or disabled")
+    try:
+        width, height = (int(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError(f"{name} must contain integer width and height") from exc
+    if width <= 0 or height <= 0:
+        raise ValueError(f"{name} width and height must be greater than 0")
+    return (width, height)
+
+
+def parse_log_level(value: str) -> str:
+    parsed = value.strip().upper()
+    if parsed not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ValueError("LEUCO_LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+    return parsed
+
+
 def load_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -154,6 +210,15 @@ def build_arg_parser() -> ArgumentParser:
     parser.add_argument("--video-path", dest="LEUCO_VIDEO_PATH")
     parser.add_argument("--model-path", dest="LEUCO_MODEL_PATH")
     parser.add_argument("--rtsp-subtype", dest="LEUCO_RTSP_SUBTYPE", choices=["0", "1"])
+    parser.add_argument("--rtsp-backend", dest="LEUCO_RTSP_BACKEND", choices=sorted(VALID_RTSP_BACKENDS))
+    parser.add_argument(
+        "--gstreamer-pipeline",
+        dest="LEUCO_GSTREAMER_PIPELINE",
+        choices=sorted(VALID_GSTREAMER_PIPELINES),
+    )
+    parser.add_argument("--inference-roi", dest="LEUCO_INFERENCE_ROI")
+    parser.add_argument("--inference-roi-reference-size", dest="LEUCO_INFERENCE_ROI_REFERENCE_SIZE")
+    parser.add_argument("--log-level", dest="LEUCO_LOG_LEVEL")
     return parser
 
 
@@ -186,12 +251,18 @@ def load_config(
     source = values["LEUCO_SOURCE"].strip()
     backend = values["LEUCO_INFERENCE_BACKEND"].strip()
     pool_gate = values["LEUCO_POOL_GATE"].strip()
+    rtsp_backend = values["LEUCO_RTSP_BACKEND"].strip().lower()
+    gstreamer_pipeline = values["LEUCO_GSTREAMER_PIPELINE"].strip().lower()
     if source not in VALID_SOURCES:
         raise ValueError(f"Invalid LEUCO_SOURCE: {source}")
     if backend not in VALID_BACKENDS:
         raise ValueError(f"Invalid LEUCO_INFERENCE_BACKEND: {backend}")
     if pool_gate not in VALID_POOL_GATES:
         raise ValueError(f"Invalid LEUCO_POOL_GATE: {pool_gate}")
+    if rtsp_backend not in VALID_RTSP_BACKENDS:
+        raise ValueError(f"Invalid LEUCO_RTSP_BACKEND: {rtsp_backend}")
+    if gstreamer_pipeline not in VALID_GSTREAMER_PIPELINES:
+        raise ValueError(f"Invalid LEUCO_GSTREAMER_PIPELINE: {gstreamer_pipeline}")
 
     http_port = parse_port(values["LEUCO_HTTP_PORT"])
     ai_fps = parse_positive_float("LEUCO_AI_FPS", values["LEUCO_AI_FPS"])
@@ -218,6 +289,12 @@ def load_config(
     topic = _first_non_empty(values, "LEUCO_NTFY_TOPIC", "NTFY_TOPIC")
     if not ntfy_url and topic:
         ntfy_url = f"https://ntfy.sh/{topic}"
+    inference_roi = parse_inference_roi(values.get("LEUCO_INFERENCE_ROI", ""))
+    inference_roi_reference_size = parse_frame_size(
+        "LEUCO_INFERENCE_ROI_REFERENCE_SIZE",
+        values.get("LEUCO_INFERENCE_ROI_REFERENCE_SIZE", ""),
+    )
+    log_level = parse_log_level(values.get("LEUCO_LOG_LEVEL", "INFO"))
 
     return AppConfig(
         http_host=values["LEUCO_HTTP_HOST"].strip(),
@@ -241,4 +318,9 @@ def load_config(
         amcrest_rtsp_main=values.get("AMCREST_RTSP_MAIN", "").strip(),
         amcrest_rtsp_sub=values.get("AMCREST_RTSP_SUB", "").strip(),
         rtsp_subtype=values.get("LEUCO_RTSP_SUBTYPE", "0").strip(),
+        rtsp_backend=rtsp_backend,
+        gstreamer_pipeline=gstreamer_pipeline,
+        inference_roi=inference_roi,
+        inference_roi_reference_size=inference_roi_reference_size,
+        log_level=log_level,
     )

@@ -123,7 +123,8 @@ INDEX_HTML = """<!doctype html>
       try {
         const res = await fetch('/status', {cache: 'no-store'});
         const data = await res.json();
-        document.getElementById('status').textContent = `${data.risk_state} | ${data.alert_state}`;
+        const message = data.message ? ` | ${data.message}` : '';
+        document.getElementById('status').textContent = `${data.risk_state || 'starting'} | ${data.alert_state || 'idle'}${message}`;
       } catch (_) {}
     }
     setInterval(tick, 1000); tick();
