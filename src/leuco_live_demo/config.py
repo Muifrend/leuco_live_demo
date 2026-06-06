@@ -7,10 +7,16 @@ import os
 from typing import Mapping
 from urllib.parse import quote
 
-from .models import BBox, FrameSize
+from .models import BBox, FrameSize, Point, Polygon
 
 CONTROL_AMCREST_ENV = Path("/mnt/ssd/projects/drowning_detection/.amcrest")
 DEMO_ENV = Path(".env")
+DEFAULT_POOL_POLYGON = (
+    "515,515;526,476;548,435;588,404;635,383;689,375;742,382;801,403;866,431;933,462;"
+    "1001,495;1064,532;1118,574;1147,615;1142,645;1110,667;1052,678;979,680;900,672;"
+    "821,653;747,630;677,614;611,606;556,594;524,567"
+)
+DEFAULT_POOL_POLYGON_REFERENCE_SIZE = "1920x1080"
 
 DEFAULTS: dict[str, str] = {
     "LEUCO_HTTP_HOST": "0.0.0.0",
@@ -18,6 +24,8 @@ DEFAULTS: dict[str, str] = {
     "LEUCO_SOURCE": "mock",
     "LEUCO_INFERENCE_BACKEND": "mock",
     "LEUCO_POOL_GATE": "disabled",
+    "LEUCO_POOL_POLYGON": DEFAULT_POOL_POLYGON,
+    "LEUCO_POOL_POLYGON_REFERENCE_SIZE": DEFAULT_POOL_POLYGON_REFERENCE_SIZE,
     "LEUCO_AI_FPS": "8",
     "LEUCO_DECISION_WINDOW_SECONDS": "6",
     "LEUCO_HIGH_RISK_FRAMES": "34",
@@ -38,7 +46,7 @@ DEFAULTS: dict[str, str] = {
 
 VALID_SOURCES = {"mock", "rtsp", "video"}
 VALID_BACKENDS = {"mock", "yolo_pose", "motion_box"}
-VALID_POOL_GATES = {"disabled", "full_frame_stub"}
+VALID_POOL_GATES = {"disabled", "full_frame_stub", "polygon"}
 VALID_RTSP_BACKENDS = {"auto", "gstreamer", "ffmpeg"}
 VALID_GSTREAMER_PIPELINES = {"auto", "h264", "h265", "decodebin", "uridecodebin"}
 DEFAULT_NTFY_URL = DEFAULTS["LEUCO_NTFY_URL"]
@@ -51,6 +59,8 @@ class AppConfig:
     source: str
     inference_backend: str
     pool_gate: str
+    pool_polygon: Polygon | None
+    pool_polygon_reference_size: FrameSize | None
     ai_fps: float
     decision_window_seconds: float
     high_risk_frames: int
@@ -144,6 +154,27 @@ def parse_inference_roi(value: str | None) -> BBox | None:
     return (x1, y1, x2, y2)
 
 
+def parse_pool_polygon(value: str | None) -> Polygon | None:
+    raw = str(value or "").strip()
+    if not raw or raw.lower() == "disabled":
+        return None
+    points: list[Point] = []
+    for raw_point in raw.split(";"):
+        parts = [part.strip() for part in raw_point.split(",")]
+        if len(parts) != 2:
+            raise ValueError("LEUCO_POOL_POLYGON must be x,y;x,y;x,y")
+        try:
+            x, y = (float(part) for part in parts)
+        except ValueError as exc:
+            raise ValueError("LEUCO_POOL_POLYGON must contain numeric coordinates") from exc
+        if x < 0 or y < 0:
+            raise ValueError("LEUCO_POOL_POLYGON coordinates must be nonnegative")
+        points.append((x, y))
+    if len(points) < 3:
+        raise ValueError("LEUCO_POOL_POLYGON must contain at least 3 points")
+    return tuple(points)
+
+
 def parse_frame_size(name: str, value: str | None) -> FrameSize | None:
     raw = str(value or "").strip().lower()
     if not raw or raw == "disabled":
@@ -203,6 +234,8 @@ def build_arg_parser() -> ArgumentParser:
     parser.add_argument("--source", dest="LEUCO_SOURCE", choices=sorted(VALID_SOURCES))
     parser.add_argument("--backend", dest="LEUCO_INFERENCE_BACKEND", choices=sorted(VALID_BACKENDS))
     parser.add_argument("--pool-gate", dest="LEUCO_POOL_GATE", choices=sorted(VALID_POOL_GATES))
+    parser.add_argument("--pool-polygon", dest="LEUCO_POOL_POLYGON")
+    parser.add_argument("--pool-polygon-reference-size", dest="LEUCO_POOL_POLYGON_REFERENCE_SIZE")
     parser.add_argument("--alerts-enabled", dest="LEUCO_ALERTS_ENABLED", action="store_true")
     parser.add_argument("--alerts-disabled", dest="LEUCO_ALERTS_ENABLED", action="store_false")
     parser.set_defaults(LEUCO_ALERTS_ENABLED=None)
@@ -294,6 +327,13 @@ def load_config(
         "LEUCO_INFERENCE_ROI_REFERENCE_SIZE",
         values.get("LEUCO_INFERENCE_ROI_REFERENCE_SIZE", ""),
     )
+    pool_polygon = parse_pool_polygon(values.get("LEUCO_POOL_POLYGON", ""))
+    pool_polygon_reference_size = parse_frame_size(
+        "LEUCO_POOL_POLYGON_REFERENCE_SIZE",
+        values.get("LEUCO_POOL_POLYGON_REFERENCE_SIZE", ""),
+    )
+    if pool_gate == "polygon" and pool_polygon is None:
+        raise ValueError("LEUCO_POOL_POLYGON is required when LEUCO_POOL_GATE=polygon")
     log_level = parse_log_level(values.get("LEUCO_LOG_LEVEL", "INFO"))
 
     return AppConfig(
@@ -302,6 +342,8 @@ def load_config(
         source=source,
         inference_backend=backend,
         pool_gate=pool_gate,
+        pool_polygon=pool_polygon,
+        pool_polygon_reference_size=pool_polygon_reference_size,
         ai_fps=ai_fps,
         decision_window_seconds=decision_window_seconds,
         high_risk_frames=high_risk_frames,

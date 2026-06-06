@@ -4,10 +4,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
+import numpy as np
+
 from leuco_live_demo.alerts import AlertManager
 from leuco_live_demo.config import load_config
 from leuco_live_demo.inference import MockInferenceBackend
-from leuco_live_demo.models import DecisionState, Frame, RiskMetrics
+from leuco_live_demo.models import DecisionState, Frame, RiskMetrics, Track
 from leuco_live_demo.pool_gate import PoolGate
 from leuco_live_demo.risk import RiskEngine
 from leuco_live_demo.sources import MockVideoSource
@@ -51,6 +53,16 @@ def run_mock_scenario(scenario: str, pool_gate: str, frames: int = 48):
     return decision, alert
 
 
+def track_with_bbox(bbox) -> Track:
+    return Track(
+        track_id=1,
+        bbox=bbox,
+        confidence=0.9,
+        keypoints={},
+        center=((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0),
+    )
+
+
 class RiskAndAlertTests(unittest.TestCase):
     def test_disabled_gate_never_activates_risk(self) -> None:
         decision, alert = run_mock_scenario("alert", "disabled")
@@ -73,6 +85,32 @@ class RiskAndAlertTests(unittest.TestCase):
         self.assertGreaterEqual(decision.high_risk_frames, 34)
         self.assertTrue(decision.should_alert)
         self.assertEqual(alert.state, "dry_run")
+
+    def test_polygon_gate_outside_track_keeps_risk_inactive(self) -> None:
+        config = config_for(LEUCO_POOL_GATE="polygon")
+        gate = PoolGate("polygon", ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)))
+        risk = RiskEngine(config)
+        frame = Frame(image=np.zeros((80, 80, 3), dtype=np.uint8), timestamp=0.0, index=0)
+        track = track_with_bbox((20, 1, 24, 8))
+
+        pool = gate.evaluate(track, frame_size=(80, 80))
+        decision = risk.process(frame, track, pool)
+
+        self.assertFalse(pool.in_pool)
+        self.assertFalse(decision.risk_active)
+
+    def test_polygon_gate_inside_track_activates_risk(self) -> None:
+        config = config_for(LEUCO_POOL_GATE="polygon")
+        gate = PoolGate("polygon", ((0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)))
+        risk = RiskEngine(config)
+        frame = Frame(image=np.zeros((80, 80, 3), dtype=np.uint8), timestamp=0.0, index=0)
+        track = track_with_bbox((4, 1, 6, 8))
+
+        pool = gate.evaluate(track, frame_size=(80, 80))
+        decision = risk.process(frame, track, pool)
+
+        self.assertTrue(pool.in_pool)
+        self.assertTrue(decision.risk_active)
 
     def test_alert_cooldown_and_idle_reset(self) -> None:
         config = config_for(LEUCO_ALERTS_ENABLED="0")

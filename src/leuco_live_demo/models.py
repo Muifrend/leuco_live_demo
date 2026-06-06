@@ -5,6 +5,7 @@ from typing import Any
 
 BBox = tuple[int, int, int, int]
 Point = tuple[float, float]
+Polygon = tuple[Point, ...]
 Keypoints = dict[str, Point]
 FrameSize = tuple[int, int]
 
@@ -45,6 +46,8 @@ class PoolState:
     in_pool: bool
     active: bool
     label: str
+    polygon: Polygon | None = None
+    test_point: Point | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,9 @@ class RuntimeStatus:
     last_alert_at: float | None
     tracked_id: int | None
     bbox: BBox | None
+    pool_gate_active: bool
+    pool_polygon: Polygon | None
+    pool_test_point: Point | None
     inference_roi: BBox | None
     inference_roi_reference_size: FrameSize | None
     upper_activity: float
@@ -120,6 +126,9 @@ class RuntimeStatus:
             "last_alert_at": self.last_alert_at,
             "tracked_id": self.tracked_id,
             "bbox": self.bbox,
+            "pool_gate_active": self.pool_gate_active,
+            "pool_polygon": self.pool_polygon,
+            "pool_test_point": self.pool_test_point,
             "inference_roi": self.inference_roi,
             "inference_roi_reference_size": self.inference_roi_reference_size,
             "upper_activity": self.upper_activity,

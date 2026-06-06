@@ -44,7 +44,11 @@ class DemoApp:
         self.backend: InferenceBackend | None = None
         self.source: VideoSource | None = None
         self.tracker = OnePersonTracker()
-        self.pool_gate = PoolGate(config.pool_gate)
+        self.pool_gate = PoolGate(
+            config.pool_gate,
+            config.pool_polygon,
+            config.pool_polygon_reference_size,
+        )
         self.risk = RiskEngine(config)
         self.alerts = AlertManager(config)
         self.capture_rate = RateMeter()
@@ -136,12 +140,14 @@ class DemoApp:
         pool: PoolState,
     ) -> None:
         LOGGER.info(
-            "config source=%s backend=%s rtsp_backend=%s gstreamer_pipeline=%s pool_gate=%s roi=%s roi_reference=%s ai_fps=%s alerts_enabled=%s",
+            "config source=%s backend=%s rtsp_backend=%s gstreamer_pipeline=%s pool_gate=%s pool_polygon=%s pool_polygon_reference=%s roi=%s roi_reference=%s ai_fps=%s alerts_enabled=%s",
             self.config.source,
             self.config.inference_backend,
             self.config.rtsp_backend,
             self.config.gstreamer_pipeline,
             self.config.pool_gate,
+            self.config.pool_polygon or "disabled",
+            self.config.pool_polygon_reference_size or "frame",
             self.config.inference_roi or "disabled",
             self.config.inference_roi_reference_size or "frame",
             self.config.ai_fps,
@@ -169,7 +175,8 @@ class DemoApp:
             raise RuntimeError("inference backend is not initialized")
         result = self.backend.infer(frame)
         track = self.tracker.update(result.detections)
-        pool = self.pool_gate.evaluate(track)
+        height, width = frame.image.shape[:2]
+        pool = self.pool_gate.evaluate(track, frame_size=(width, height))
         decision = self.risk.process(frame, track, pool)
         alert = self.alerts.maybe_send(decision)
         self._last_ai_at = frame.timestamp
@@ -185,7 +192,7 @@ class DemoApp:
         capture_fps: float,
         message: str,
     ) -> None:
-        status = build_status(self.config, decision, alert, track, capture_fps, message)
+        status = build_status(self.config, decision, alert, track, pool, capture_fps, message)
         try:
             annotated = draw_overlay(image, status, track, pool)
         except Exception as exc:  # noqa: BLE001 - preserve status if overlay rendering fails
@@ -204,10 +211,11 @@ class DemoApp:
         decision: DecisionState,
         alert: AlertState,
         track: Track | None,
+        pool: PoolState,
         capture_fps: float,
         message: str,
     ) -> None:
-        status = build_status(self.config, decision, alert, track, capture_fps, message)
+        status = build_status(self.config, decision, alert, track, pool, capture_fps, message)
         self.shared_state.update_status(status.as_dict())
 
     def _publish_placeholder(
@@ -234,7 +242,7 @@ class DemoApp:
         if now - self._last_placeholder_at >= PLACEHOLDER_INTERVAL_SECONDS:
             self._publish_placeholder(message, decision, alert, track, pool)
             return
-        self._publish_status(decision, alert, track, 0.0, message)
+        self._publish_status(decision, alert, track, pool, 0.0, message)
 
     def _placeholder_image(self, message: str):
         image = np.zeros((720, 1280, 3), dtype=np.uint8)
@@ -291,10 +299,12 @@ class DemoApp:
         if now - self._last_status_log_at < STATUS_LOG_INTERVAL_SECONDS:
             return
         LOGGER.info(
-            "frame=%s capture_fps=%.1f person=%s risk=%s high_risk=%s/%s alert=%s message=%s",
+            "frame=%s capture_fps=%.1f person=%s in_pool=%s risk_active=%s risk=%s high_risk=%s/%s alert=%s message=%s",
             frame_index,
             capture_fps,
             decision.person_detected,
+            decision.in_pool,
+            decision.risk_active,
             decision.risk_state,
             decision.high_risk_frames,
             decision.window_size,

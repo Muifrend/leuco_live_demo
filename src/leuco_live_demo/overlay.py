@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import cv2
+import numpy as np
 
 from .config import AppConfig
 from .models import AlertState, DecisionState, PoolState, RuntimeStatus, Track
@@ -12,6 +13,7 @@ def build_status(
     decision: DecisionState,
     alert: AlertState,
     track: Track | None,
+    pool: PoolState,
     capture_fps: float,
     message: str = "",
 ) -> RuntimeStatus:
@@ -32,6 +34,9 @@ def build_status(
         last_alert_at=alert.last_alert_at,
         tracked_id=track.track_id if track and track.missed_frames == 0 else None,
         bbox=track.bbox if track and track.missed_frames == 0 else None,
+        pool_gate_active=pool.active,
+        pool_polygon=pool.polygon,
+        pool_test_point=pool.test_point,
         inference_roi=config.inference_roi,
         inference_roi_reference_size=config.inference_roi_reference_size,
         upper_activity=round(decision.metrics.upper_activity, 4),
@@ -52,6 +57,16 @@ def draw_overlay(
     if status.pool_gate == "full_frame_stub":
         cv2.rectangle(canvas, (4, 4), (width - 5, height - 5), (0, 220, 255), 3)
         _label(canvas, "FULL-FRAME POOL STUB", (18, 32), (0, 220, 255))
+
+    if status.pool_polygon:
+        polygon_color = (0, 220, 255) if status.in_pool else (0, 170, 255)
+        polygon_points = np.array(
+            [[(int(round(x)), int(round(y))) for x, y in status.pool_polygon]],
+            dtype=np.int32,
+        )
+        cv2.polylines(canvas, polygon_points, isClosed=True, color=polygon_color, thickness=3)
+        first_x, first_y = polygon_points[0][0]
+        _label(canvas, "POOL POLYGON", (int(first_x), max(22, int(first_y) - 8)), polygon_color)
 
     if status.inference_roi is not None:
         x1, y1, x2, y2 = scale_roi_to_frame(
@@ -77,9 +92,16 @@ def draw_overlay(
         for x, y in track.keypoints.values():
             cv2.circle(canvas, (int(x), int(y)), 3, (255, 255, 255), -1)
 
+    if status.pool_test_point is not None:
+        x, y = status.pool_test_point
+        test_color = (0, 220, 0) if status.in_pool else (0, 0, 255)
+        cv2.circle(canvas, (int(round(x)), int(round(y))), 7, test_color, -1)
+        cv2.circle(canvas, (int(round(x)), int(round(y))), 10, (255, 255, 255), 2)
+
     rows = [
         f"source {status.source} | backend {status.backend}",
-        f"person {'yes' if status.person_detected else 'no'} | pool {pool.label}",
+        f"person {'yes' if status.person_detected else 'no'} | in-pool {'yes' if status.in_pool else 'no'}",
+        f"pool gate {'active' if status.pool_gate_active else 'inactive'} | {pool.label}",
         f"risk {'active' if status.risk_active else 'inactive'} | state {status.risk_state}",
         f"high-risk {status.high_risk_frames}/{status.window_size} | ai {status.ai_fps:g} fps",
         f"activity {status.upper_activity:.3f} | progress {status.forward_progress:.3f}",

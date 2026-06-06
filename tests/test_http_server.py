@@ -33,8 +33,13 @@ class HttpServerTests(unittest.TestCase):
             with urlopen(f"http://127.0.0.1:{port}/", timeout=2) as response:
                 index = response.read()
             self.assertIn(b"Leuco Live Demo", index)
-            self.assertIn(b'src="stream.mjpg"', index)
-            self.assertIn(b"fetch('status'", index)
+            self.assertIn(b'id="stream"', index)
+            self.assertIn(b"connectStream()", index)
+            self.assertIn(b"endpoint('status')", index)
+
+            with urlopen(f"http://127.0.0.1:{port}/proxy/8080", timeout=2) as response:
+                prefixed_index = response.read()
+            self.assertIn(b"Leuco Live Demo", prefixed_index)
 
             with urlopen(f"http://127.0.0.1:{port}/proxy/8080/status", timeout=2) as response:
                 prefixed_payload = json.loads(response.read().decode("utf-8"))

@@ -75,6 +75,19 @@ class ConfigTests(unittest.TestCase):
 
             self.assertIsNone(config.inference_roi)
 
+    def test_pool_polygon_defaults_to_roboflow_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load_config(
+                argv=[],
+                environ={},
+                demo_env=Path(tmp) / ".env",
+                amcrest_env=Path(tmp) / ".amcrest",
+            )
+
+            self.assertEqual(config.pool_polygon_reference_size, (1920, 1080))
+            self.assertEqual(len(config.pool_polygon or ()), 25)
+            self.assertEqual((config.pool_polygon or ())[0], (515.0, 515.0))
+
     def test_inference_roi_parses_cli_value(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = load_config(
@@ -139,6 +152,54 @@ class ConfigTests(unittest.TestCase):
                 load_config(
                     argv=[],
                     environ={"LEUCO_LOG_LEVEL": "chatty"},
+                    demo_env=Path(tmp) / ".env",
+                    amcrest_env=Path(tmp) / ".amcrest",
+                )
+
+    def test_pool_polygon_parses_cli_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load_config(
+                argv=[
+                    "--pool-gate",
+                    "polygon",
+                    "--pool-polygon",
+                    "1,2;30,4;5,60",
+                    "--pool-polygon-reference-size",
+                    "100x80",
+                ],
+                environ={},
+                demo_env=Path(tmp) / ".env",
+                amcrest_env=Path(tmp) / ".amcrest",
+            )
+
+            self.assertEqual(config.pool_gate, "polygon")
+            self.assertEqual(config.pool_polygon, ((1.0, 2.0), (30.0, 4.0), (5.0, 60.0)))
+            self.assertEqual(config.pool_polygon_reference_size, (100, 80))
+
+    def test_pool_polygon_rejects_bad_values(self) -> None:
+        cases = [
+            ("1,2;3,4", "at least 3"),
+            ("1,2;3;4,5", "x,y;x,y"),
+            ("1,2;3,nope;4,5", "numeric"),
+            ("1,2;-3,4;5,6", "nonnegative"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            for value, pattern in cases:
+                with self.subTest(value=value):
+                    with self.assertRaisesRegex(ValueError, pattern):
+                        load_config(
+                            argv=[],
+                            environ={"LEUCO_POOL_POLYGON": value},
+                            demo_env=Path(tmp) / ".env",
+                            amcrest_env=Path(tmp) / ".amcrest",
+                        )
+
+    def test_polygon_gate_requires_polygon(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "LEUCO_POOL_POLYGON"):
+                load_config(
+                    argv=["--pool-gate", "polygon", "--pool-polygon", "disabled"],
+                    environ={},
                     demo_env=Path(tmp) / ".env",
                     amcrest_env=Path(tmp) / ".amcrest",
                 )

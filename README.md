@@ -25,28 +25,28 @@ Useful mock scenarios:
 .venv/bin/python -m leuco_live_demo --source mock --backend mock --pool-gate full_frame_stub --mock-scenario alert
 ```
 
-RTSP smoke mode, before polygon calibration:
+RTSP smoke mode, before polygon/risk calibration:
 
 ```bash
 .venv/bin/python -m leuco_live_demo --source rtsp --backend motion_box --pool-gate disabled
 ```
 
-RTSP YOLO pose mode with the current tightened high/wide camera ROI:
+RTSP YOLO pose mode with the current tightened high/wide camera ROI and pool polygon gate:
 
 ```bash
-.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate polygon --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882
 ```
 
 Use debug logs while tuning camera/model startup:
 
 ```bash
-.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate disabled --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline auto --backend yolo_pose --pool-gate polygon --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
 ```
 
 If the camera main stream is H.265, force the H.265 GStreamer pipeline:
 
 ```bash
-.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline h265 --backend yolo_pose --pool-gate disabled --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
+.venv/bin/python -m leuco_live_demo --source rtsp --rtsp-backend gstreamer --gstreamer-pipeline h265 --backend yolo_pose --pool-gate polygon --inference-roi 360,285,1080,670 --inference-roi-reference-size 1554x882 --log-level DEBUG
 ```
 
 `--gstreamer-pipeline auto` tries H.264 forced TCP, H.264 default transport,
@@ -60,6 +60,12 @@ to inference. If those points were picked from a screenshot, set
 `LEUCO_INFERENCE_ROI_REFERENCE_SIZE` to that screenshot's `WIDTHxHEIGHT` so the
 app scales the crop to the true RTSP frame size. The HTTP stream remains
 full-frame, and the overlay draws the effective ROI rectangle.
+
+`LEUCO_POOL_POLYGON` accepts `x,y;x,y;x,y` and defaults to the Roboflow
+pool-water outline from a `1920x1080` reference image. With
+`--pool-gate polygon`, the app tests the tracked person's lower-center
+bounding-box point against the scaled polygon. Risk stays inactive when the
+person is outside the polygon.
 
 The RTSP source reads Amcrest credentials from
 `/mnt/ssd/projects/drowning_detection/.amcrest`.
