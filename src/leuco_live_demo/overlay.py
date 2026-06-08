@@ -41,6 +41,9 @@ def build_status(
         inference_roi_reference_size=config.inference_roi_reference_size,
         upper_activity=round(decision.metrics.upper_activity, 4),
         forward_progress=round(decision.metrics.forward_progress, 4),
+        lost_visibility_frames=decision.metrics.lost_visibility_frames,
+        distress_candidate_frames=decision.metrics.distress_candidate_frames,
+        alert_reason=decision.alert_reason,
         message=message or alert.last_error or "",
     )
 
@@ -107,6 +110,12 @@ def draw_overlay(
         f"activity {status.upper_activity:.3f} | progress {status.forward_progress:.3f}",
         f"alert {status.alert_state} | capture {status.capture_fps:.1f} fps",
     ]
+    if status.lost_visibility_frames or status.distress_candidate_frames:
+        rows.append(
+            f"lost visibility {status.lost_visibility_frames} | distress {status.distress_candidate_frames}"
+        )
+    if status.alert_reason:
+        rows.append(f"reason {status.alert_reason[:70]}")
     if status.message:
         rows.append(f"message {status.message[:70]}")
     _panel(canvas, rows)

@@ -56,6 +56,8 @@ class RiskMetrics:
     forward_progress: float = 0.0
     high_activity: bool = False
     low_progress: bool = False
+    lost_visibility_frames: int = 0
+    distress_candidate_frames: int = 0
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,7 @@ class DecisionState:
     ai_fps: float
     should_alert: bool
     metrics: RiskMetrics = field(default_factory=RiskMetrics)
+    alert_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -106,6 +109,9 @@ class RuntimeStatus:
     inference_roi_reference_size: FrameSize | None
     upper_activity: float
     forward_progress: float
+    lost_visibility_frames: int
+    distress_candidate_frames: int
+    alert_reason: str
     message: str = ""
 
     def as_dict(self) -> dict[str, object]:
@@ -133,5 +139,8 @@ class RuntimeStatus:
             "inference_roi_reference_size": self.inference_roi_reference_size,
             "upper_activity": self.upper_activity,
             "forward_progress": self.forward_progress,
+            "lost_visibility_frames": self.lost_visibility_frames,
+            "distress_candidate_frames": self.distress_candidate_frames,
+            "alert_reason": self.alert_reason,
             "message": self.message,
         }

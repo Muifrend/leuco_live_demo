@@ -2,8 +2,8 @@
 
 Host-native Jetson demo app for the Leuco live drowning-risk proof of concept.
 
-This phase intentionally excludes physical camera placement and real pool polygon
-calibration. The only pool gate modes are `disabled` and `full_frame_stub`.
+This phase intentionally excludes physical camera placement finalization. Pool
+gating supports `disabled`, `full_frame_stub`, and `polygon`.
 
 ## Run
 
@@ -66,6 +66,16 @@ pool-water mask from a `2960x1668` reference image. With
 `--pool-gate polygon`, the app tests the tracked person's lower-center
 bounding-box point against the scaled polygon. Risk stays inactive when the
 person is outside the polygon.
+
+The alert gate has three paths. A notification is sent immediately when at
+least `LEUCO_HIGH_RISK_FRAMES` of the last 48 AI frames are high-risk; the
+default is 15. Pose-risk accumulation can also start a distress candidate after
+`LEUCO_POSE_RISK_FRAMES` high-risk frames while the current frame is high-risk.
+Lost-swimmer accumulation starts a candidate after `LEUCO_LOST_SWIMMER_FRAMES`
+frames without a fresh person or YOLO pose after the swimmer was last confirmed
+inside the pool and no exit was confirmed. Candidate paths notify after
+`LEUCO_DISTRESS_PERSIST_SECONDS`. A detected outside-pool person must remain
+outside for `LEUCO_CONFIRMED_EXIT_SECONDS` before the in-pool memory is cleared.
 
 The RTSP source reads Amcrest credentials from
 `/mnt/ssd/projects/drowning_detection/.amcrest`.

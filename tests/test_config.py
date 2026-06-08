@@ -64,6 +64,31 @@ class ConfigTests(unittest.TestCase):
                     amcrest_env=Path(tmp) / ".amcrest",
                 )
 
+    def test_temporal_distress_config_parses_cli_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = load_config(
+                argv=[
+                    "--pose-risk-frames",
+                    "9",
+                    "--lost-swimmer-frames",
+                    "11",
+                    "--distress-persist-seconds",
+                    "3.0",
+                    "--confirmed-exit-seconds",
+                    "1.25",
+                ],
+                environ={"LEUCO_AI_FPS": "8"},
+                demo_env=Path(tmp) / ".env",
+                amcrest_env=Path(tmp) / ".amcrest",
+            )
+
+            self.assertEqual(config.pose_risk_frames, 9)
+            self.assertEqual(config.lost_swimmer_frames, 11)
+            self.assertEqual(config.distress_persist_seconds, 3.0)
+            self.assertEqual(config.confirmed_exit_seconds, 1.25)
+            self.assertEqual(config.distress_persist_frames, 24)
+            self.assertEqual(config.confirmed_exit_frames, 10)
+
     def test_inference_roi_defaults_to_disabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config = load_config(

@@ -105,8 +105,8 @@ The live demo should prioritize stability, clarity, and low latency over perfect
 | AI processing rate | Process approximately 8 AI frames per second  |
 | Decision window    | 6 seconds                                     |
 | Window size        | 48 processed AI frames                        |
-| Alert threshold    | 34 high-risk frames out of 48                 |
-| Current-frame rule | Current frame must also be high-risk          |
+| Alert threshold    | 15 high-risk frames out of 48                 |
+| Current-frame rule | Not required for the rolling count alert      |
 | Pool gating        | Use a rough polygon mask                      |
 | People in demo     | One person                                    |
 | Alert system       | ntfy                                          |
@@ -247,13 +247,13 @@ Recommended final setting:
 | AI processing rate               | 8 frames per second |
 | Decision window                  |           6 seconds |
 | Total processed frames in window |           48 frames |
-| Required high-risk frames        |           34 frames |
-| Required percentage              |           About 70% |
+| Required high-risk frames        |           15 frames |
+| Required percentage              |           About 31% |
 | Cooldown after alert             |          60 seconds |
 
 Alert rule:
 
-**Send an ntfy alert when at least 34 of the last 48 processed frames are high-risk and the current frame is also high-risk.**
+**Send an ntfy alert when at least 15 of the last 48 processed frames are high-risk.**
 
 This keeps the demo responsive while avoiding one-frame false triggers.
 
@@ -271,7 +271,7 @@ Recommended overlay fields:
 | In pool             | Yes / No           |
 | Risk classification | Inactive / Active  |
 | Risk state          | Normal / High-risk |
-| High-risk frames    | 34 / 48 required   |
+| High-risk frames    | 15 / 48 required   |
 | Decision window     | 6 seconds          |
 | AI processing rate  | 8 fps              |
 | Alert               | Pending / Sent     |
@@ -345,8 +345,7 @@ Expected behavior:
 
 Expected behavior:
 
-* High-risk frame count reaches 34 of 48
-* Current frame is also high-risk
+* High-risk frame count reaches 15 of 48
 * ntfy notification sends once
 * Overlay changes alert status to sent
 * Cooldown prevents repeated alert spam
@@ -586,8 +585,8 @@ Use this as the final locked configuration:
 | AI processing rate          |                                                   8 fps |
 | Decision window             |                                               6 seconds |
 | Processed frames per window |                                                      48 |
-| High-risk alert threshold   |                                               34 frames |
-| Required proportion         |                                               About 70% |
+| High-risk alert threshold   |                                               15 frames |
+| Required proportion         |                                               About 31% |
 | Alert cooldown              |                                              60 seconds |
 | People                      |                                              One person |
 | Pool mask                   |                                           Rough polygon |

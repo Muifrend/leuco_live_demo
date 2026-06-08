@@ -299,7 +299,7 @@ class DemoApp:
         if now - self._last_status_log_at < STATUS_LOG_INTERVAL_SECONDS:
             return
         LOGGER.info(
-            "frame=%s capture_fps=%.1f person=%s in_pool=%s risk_active=%s risk=%s high_risk=%s/%s alert=%s message=%s",
+            "frame=%s capture_fps=%.1f person=%s in_pool=%s risk_active=%s risk=%s high_risk=%s/%s lost_visibility=%s distress=%s alert=%s reason=%s message=%s",
             frame_index,
             capture_fps,
             decision.person_detected,
@@ -308,7 +308,10 @@ class DemoApp:
             decision.risk_state,
             decision.high_risk_frames,
             decision.window_size,
+            decision.metrics.lost_visibility_frames,
+            decision.metrics.distress_candidate_frames,
             alert.state,
+            decision.alert_reason or "none",
             message or "ok",
         )
         self._last_status_log_at = now

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import replace
 import math
 
 import cv2
@@ -34,7 +35,7 @@ def _frame_diag(frame: Frame) -> float:
 
 
 class RiskEngine:
-    """Frame-level cue scoring plus the 6-second rolling alert rule."""
+    """Frame-level cue scoring plus temporal in-pool distress rules."""
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
@@ -43,14 +44,23 @@ class RiskEngine:
         self._prev_keypoints: dict[str, tuple[float, float]] | None = None
         self._prev_center: tuple[float, float] | None = None
         self._prev_gray = None
+        self._inside_pool_session = False
+        self._lost_visibility_armed = False
+        self._outside_pool_frames = 0
+        self._lost_visibility_frames = 0
+        self._distress_candidate_frames = 0
 
     def process(self, frame: Frame, track: Track | None, pool: PoolState) -> DecisionState:
         person_present = track is not None and track.missed_frames == 0
-        risk_active = bool(person_present and pool.active and pool.in_pool)
+        current_in_pool = bool(pool.active and pool.in_pool)
+        reliable_in_pool_detection = self._reliable_in_pool_detection(track, person_present, current_in_pool)
+        self._update_pool_session(pool, person_present, reliable_in_pool_detection)
+        session_in_pool = bool(pool.active and self._inside_pool_session)
+        risk_active = session_in_pool
 
         metrics = RiskMetrics()
         high_risk = False
-        if risk_active and track is not None:
+        if person_present and current_in_pool and track is not None:
             self.centers.append(track.center)
             metrics = self._metrics(frame, track)
             high_risk = metrics.high_activity and metrics.low_progress
@@ -58,28 +68,160 @@ class RiskEngine:
             self._prev_keypoints = None
             self._prev_center = None
 
+        self._update_visibility_loss(track, person_present, current_in_pool, reliable_in_pool_detection)
         self.window.append(high_risk)
         high_count = sum(1 for item in self.window if item)
-        should_alert = (
+        pose_candidate = bool(
+            session_in_pool
+            and high_risk
+            and high_count >= self.config.pose_risk_frames
+        )
+        lost_candidate = bool(
+            session_in_pool
+            and self._lost_visibility_frames >= self.config.lost_swimmer_frames
+        )
+        if pose_candidate or lost_candidate:
+            self._distress_candidate_frames += 1
+        else:
+            self._distress_candidate_frames = 0
+
+        high_risk_count_alert = bool(
             len(self.window) == self.window.maxlen
             and high_count >= self.config.high_risk_frames
-            and high_risk
+        )
+        persistent_alert = self._distress_candidate_frames >= self.config.distress_persist_frames
+        should_alert = bool(session_in_pool and (high_risk_count_alert or persistent_alert))
+        alert_reason = self._alert_reason(high_risk_count_alert, pose_candidate, lost_candidate)
+        risk_state = self._risk_state(high_risk, pose_candidate, lost_candidate, should_alert)
+
+        metrics = replace(
+            metrics,
+            lost_visibility_frames=self._lost_visibility_frames,
+            distress_candidate_frames=self._distress_candidate_frames,
         )
 
         self._prev_gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
 
         return DecisionState(
             person_detected=person_present,
-            in_pool=bool(pool.in_pool),
+            in_pool=session_in_pool,
             risk_active=risk_active,
-            risk_state="high_risk" if high_risk else "normal",
+            risk_state=risk_state,
             high_risk_frames=high_count,
             window_size=self.config.window_size,
             window_seconds=self.config.decision_window_seconds,
             ai_fps=self.config.ai_fps,
             should_alert=should_alert,
             metrics=metrics,
+            alert_reason=alert_reason,
         )
+
+    def _update_pool_session(
+        self,
+        pool: PoolState,
+        person_present: bool,
+        reliable_in_pool_detection: bool,
+    ) -> None:
+        if not pool.active:
+            self._clear_pool_session(clear_window=True)
+            return
+        if reliable_in_pool_detection:
+            self._inside_pool_session = True
+            self._lost_visibility_armed = True
+            self._outside_pool_frames = 0
+            return
+        if person_present and not pool.in_pool:
+            if self._inside_pool_session:
+                self._outside_pool_frames += 1
+                if self._outside_pool_frames >= self.config.confirmed_exit_frames:
+                    self._clear_pool_session(clear_window=True)
+            return
+        self._outside_pool_frames = 0
+
+    def _update_visibility_loss(
+        self,
+        track: Track | None,
+        person_present: bool,
+        current_in_pool: bool,
+        reliable_in_pool_detection: bool,
+    ) -> None:
+        if not self._inside_pool_session or not self._lost_visibility_armed:
+            self._lost_visibility_frames = 0
+            return
+        if reliable_in_pool_detection:
+            self._lost_visibility_frames = 0
+            return
+
+        pose_missing = bool(
+            person_present
+            and current_in_pool
+            and self.config.inference_backend == "yolo_pose"
+            and track is not None
+            and self._missing_body_pose(track)
+        )
+        if not person_present or pose_missing:
+            self._lost_visibility_frames += 1
+            return
+        if current_in_pool:
+            self._lost_visibility_frames = 0
+
+    def _clear_pool_session(self, clear_window: bool = False) -> None:
+        self._inside_pool_session = False
+        self._lost_visibility_armed = False
+        self._outside_pool_frames = 0
+        self._lost_visibility_frames = 0
+        self._distress_candidate_frames = 0
+        self.centers.clear()
+        self._prev_keypoints = None
+        self._prev_center = None
+        if clear_window:
+            self.window.clear()
+
+    def _alert_reason(
+        self,
+        high_risk_count_alert: bool,
+        pose_candidate: bool,
+        lost_candidate: bool,
+    ) -> str:
+        if lost_candidate:
+            return "lost swimmer after in-pool track"
+        if high_risk_count_alert:
+            return "high-risk frame count"
+        if pose_candidate:
+            return "pose risk accumulation"
+        return ""
+
+    def _risk_state(
+        self,
+        high_risk: bool,
+        pose_candidate: bool,
+        lost_candidate: bool,
+        should_alert: bool,
+    ) -> str:
+        if should_alert:
+            return "high_risk"
+        if lost_candidate:
+            return "lost_swimmer"
+        if pose_candidate:
+            return "possible_distress"
+        if high_risk:
+            return "high_risk"
+        return "normal"
+
+    def _missing_body_pose(self, track: Track) -> bool:
+        return len(UPPER_BODY_KEYS.intersection(track.keypoints)) < 3
+
+    def _reliable_in_pool_detection(
+        self,
+        track: Track | None,
+        person_present: bool,
+        current_in_pool: bool,
+    ) -> bool:
+        if not person_present or not current_in_pool or track is None:
+            return False
+        if self.config.inference_backend == "yolo_pose":
+            return not self._missing_body_pose(track)
+        return True
 
     def _metrics(self, frame: Frame, track: Track) -> RiskMetrics:
         if track.keypoints:

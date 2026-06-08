@@ -28,7 +28,11 @@ DEFAULTS: dict[str, str] = {
     "LEUCO_POOL_POLYGON_REFERENCE_SIZE": DEFAULT_POOL_POLYGON_REFERENCE_SIZE,
     "LEUCO_AI_FPS": "8",
     "LEUCO_DECISION_WINDOW_SECONDS": "6",
-    "LEUCO_HIGH_RISK_FRAMES": "34",
+    "LEUCO_HIGH_RISK_FRAMES": "15",
+    "LEUCO_POSE_RISK_FRAMES": "10",
+    "LEUCO_LOST_SWIMMER_FRAMES": "12",
+    "LEUCO_DISTRESS_PERSIST_SECONDS": "2.5",
+    "LEUCO_CONFIRMED_EXIT_SECONDS": "1.0",
     "LEUCO_ALERT_COOLDOWN_SECONDS": "60",
     "LEUCO_ALERTS_ENABLED": "0",
     "LEUCO_NTFY_URL": "https://ntfy.sh/leuco",
@@ -64,6 +68,10 @@ class AppConfig:
     ai_fps: float
     decision_window_seconds: float
     high_risk_frames: int
+    pose_risk_frames: int
+    lost_swimmer_frames: int
+    distress_persist_seconds: float
+    confirmed_exit_seconds: float
     alert_cooldown_seconds: float
     alerts_enabled: bool
     ntfy_url: str
@@ -86,6 +94,14 @@ class AppConfig:
     @property
     def window_size(self) -> int:
         return max(1, int(round(self.ai_fps * self.decision_window_seconds)))
+
+    @property
+    def distress_persist_frames(self) -> int:
+        return max(1, int(round(self.ai_fps * self.distress_persist_seconds)))
+
+    @property
+    def confirmed_exit_frames(self) -> int:
+        return max(1, int(round(self.ai_fps * self.confirmed_exit_seconds)))
 
     @property
     def rtsp_url(self) -> str:
@@ -236,6 +252,10 @@ def build_arg_parser() -> ArgumentParser:
     parser.add_argument("--pool-gate", dest="LEUCO_POOL_GATE", choices=sorted(VALID_POOL_GATES))
     parser.add_argument("--pool-polygon", dest="LEUCO_POOL_POLYGON")
     parser.add_argument("--pool-polygon-reference-size", dest="LEUCO_POOL_POLYGON_REFERENCE_SIZE")
+    parser.add_argument("--pose-risk-frames", dest="LEUCO_POSE_RISK_FRAMES", type=int)
+    parser.add_argument("--lost-swimmer-frames", dest="LEUCO_LOST_SWIMMER_FRAMES", type=int)
+    parser.add_argument("--distress-persist-seconds", dest="LEUCO_DISTRESS_PERSIST_SECONDS", type=float)
+    parser.add_argument("--confirmed-exit-seconds", dest="LEUCO_CONFIRMED_EXIT_SECONDS", type=float)
     parser.add_argument("--alerts-enabled", dest="LEUCO_ALERTS_ENABLED", action="store_true")
     parser.add_argument("--alerts-disabled", dest="LEUCO_ALERTS_ENABLED", action="store_false")
     parser.set_defaults(LEUCO_ALERTS_ENABLED=None)
@@ -310,6 +330,21 @@ def load_config(
             "LEUCO_HIGH_RISK_FRAMES cannot exceed the processed decision window "
             f"({high_risk_frames} > {window_size})"
         )
+    pose_risk_frames = parse_positive_int("LEUCO_POSE_RISK_FRAMES", values["LEUCO_POSE_RISK_FRAMES"])
+    if pose_risk_frames > window_size:
+        raise ValueError(
+            "LEUCO_POSE_RISK_FRAMES cannot exceed the processed decision window "
+            f"({pose_risk_frames} > {window_size})"
+        )
+    lost_swimmer_frames = parse_positive_int("LEUCO_LOST_SWIMMER_FRAMES", values["LEUCO_LOST_SWIMMER_FRAMES"])
+    distress_persist_seconds = parse_positive_float(
+        "LEUCO_DISTRESS_PERSIST_SECONDS",
+        values["LEUCO_DISTRESS_PERSIST_SECONDS"],
+    )
+    confirmed_exit_seconds = parse_positive_float(
+        "LEUCO_CONFIRMED_EXIT_SECONDS",
+        values["LEUCO_CONFIRMED_EXIT_SECONDS"],
+    )
     alert_cooldown_seconds = parse_nonnegative_float(
         "LEUCO_ALERT_COOLDOWN_SECONDS",
         values["LEUCO_ALERT_COOLDOWN_SECONDS"],
@@ -347,6 +382,10 @@ def load_config(
         ai_fps=ai_fps,
         decision_window_seconds=decision_window_seconds,
         high_risk_frames=high_risk_frames,
+        pose_risk_frames=pose_risk_frames,
+        lost_swimmer_frames=lost_swimmer_frames,
+        distress_persist_seconds=distress_persist_seconds,
+        confirmed_exit_seconds=confirmed_exit_seconds,
         alert_cooldown_seconds=alert_cooldown_seconds,
         alerts_enabled=parse_bool(values["LEUCO_ALERTS_ENABLED"]),
         ntfy_url=ntfy_url,
