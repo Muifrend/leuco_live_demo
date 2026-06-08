@@ -1,6 +1,6 @@
 # Leuco Live Demo
 
-## Manifest
+## Manifesto
 
 Drowning is the leading cause of death for children ages 1-4 in the United States. Not cars. Not disease. Drowning. In CPSC-reported pool and spa fatalities involving children younger than 15, 74 percent happened in residential settings; for children younger than 5, it was 86 percent. The problem this demo is aimed at is not the public pool with lifeguards and commercial safety infrastructure. It is the backyard, the side yard, the private pool, and the few seconds when an adult looks away.
 
