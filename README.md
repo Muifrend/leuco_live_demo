@@ -2,7 +2,7 @@
 
 ## Manifesto
 
-Drowning is the leading cause of death for children ages 1-4 in the United States. Not cars. Not disease. Drowning. In CPSC-reported pool and spa fatalities involving children younger than 15, 74 percent happened in residential settings; for children younger than 5, it was 86 percent. The problem this demo is aimed at is not the public pool with lifeguards and commercial safety infrastructure. It is the backyard, the side yard, the private pool, and the few seconds when an adult looks away.
+As a certified lifeguard I was appaled to learn that drowning is the leading cause of death for children ages 1-4 in the United States. Not cars. Not disease. Drowning. In CPSC-reported pool and spa fatalities involving children younger than 15, 74 percent happened in residential settings; for children younger than 5, it was 86 percent. The problem this demo is aimed at is not the public pool with lifeguards and commercial safety infrastructure. It is the backyard, the side yard, the private pool, and the few seconds when an adult looks away.
 
 AI-assisted drowning detection exists. Lynxight, Poseidon, and other commercial systems have shown that computer vision can help aquatic safety teams. But those systems are built for hotels, aquatic centers, waterparks, and municipalities. They assume commercial budgets, managed infrastructure, and deployment environments that do not fit a family home.
 
