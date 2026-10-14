@@ -22,6 +22,8 @@ Sources for the safety context: [CDC drowning facts](https://www.cdc.gov/drownin
 
 ## Current Demo
 
+[![Leuco live demo video](https://img.youtube.com/vi/uVCIBp2lz4Q/maxresdefault.jpg)](https://www.youtube.com/watch?v=uVCIBp2lz4Q)
+
 This repository contains a host-native Jetson Python demo for live, local drowning-risk detection. It is built to run against an Amcrest pool camera, but it also includes mock and video-file modes for repeatable development.
 
 The current pipeline is:
